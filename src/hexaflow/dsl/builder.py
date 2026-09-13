@@ -34,6 +34,7 @@ class _StepBuilder:
         action: Any,
         depends_on: tuple[str, ...] = (),
         retry_policy: RetryPolicy | None = None,
+        retries: RetryPolicy | None = None,
         compensation: Any | None = None,
         timeout_seconds: float | None = None,
         is_split: bool = False,
@@ -153,6 +154,7 @@ class Workflow:
         stage: str | None = None,
         depends_on: tuple[str, ...] | list[str] = (),
         retry_policy: RetryPolicy | None = None,
+        retries: RetryPolicy | None = None,
         compensation: Any | None = None,
         timeout_seconds: float | None = None,
         is_split: bool = False,
@@ -178,6 +180,7 @@ class Workflow:
             self.stage(target_stage)
 
         deps = tuple(depends_on)
+        active_policy = retry_policy or retries
 
         def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             builder = _StepBuilder(
@@ -185,7 +188,7 @@ class Workflow:
                 stage_name=target_stage,
                 action=fn,
                 depends_on=deps,
-                retry_policy=retry_policy,
+                retry_policy=active_policy,
                 compensation=compensation,
                 timeout_seconds=timeout_seconds,
                 is_split=is_split,
