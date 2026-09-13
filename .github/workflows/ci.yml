@@ -107,4 +107,4 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Run Hypothesis Fuzzing
-        run: uv run pytest tests/hypothesis
+        run: uv run pytest tests/properties

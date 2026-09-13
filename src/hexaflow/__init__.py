@@ -5,8 +5,67 @@ Notes/Architectural Intent:
     splits (fan-out), joins (barriers), and checkpointed state resumption.
 """
 
+from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
+from hexaflow.adapters.storage.in_memory import InMemoryStateStore
+from hexaflow.adapters.storage.sqlite import SqliteStateStore
+from hexaflow.domain.exceptions import (
+    CheckpointCorruptError,
+    DuplicateStepError,
+    InvalidWorkflowDAGError,
+    StepFailedError,
+    StepNotFoundError,
+    WorkflowAborted,
+    WorkflowError,
+    WorkflowSuspended,
+)
+from hexaflow.domain.models import (
+    StageDefinition,
+    StageExecutionMode,
+    StepDefinition,
+    WorkflowDefinition,
+)
+from hexaflow.domain.retry import (
+    BackoffType,
+    RetryPolicy,
+)
+from hexaflow.domain.state import (
+    CheckpointRecord,
+    StepContext,
+    StepStatus,
+    WorkflowExecutionState,
+    WorkflowStatus,
+)
+from hexaflow.dsl.builder import Workflow
+from hexaflow.ports.engine import WorkflowEnginePort
+from hexaflow.ports.storage import WorkflowStateStorePort
+
 __version__ = "0.0.0"
 
 __all__ = [
+    "AsyncioWorkflowEngine",
+    "BackoffType",
+    "CheckpointCorruptError",
+    "CheckpointRecord",
+    "DuplicateStepError",
+    "InMemoryStateStore",
+    "InvalidWorkflowDAGError",
+    "RetryPolicy",
+    "SqliteStateStore",
+    "StageDefinition",
+    "StageExecutionMode",
+    "StepContext",
+    "StepDefinition",
+    "StepFailedError",
+    "StepNotFoundError",
+    "StepStatus",
+    "Workflow",
+    "WorkflowAborted",
+    "WorkflowDefinition",
+    "WorkflowEnginePort",
+    "WorkflowError",
+    "WorkflowExecutionState",
+    "WorkflowStateStorePort",
+    "WorkflowStatus",
+    "WorkflowSuspended",
     "__version__",
 ]
