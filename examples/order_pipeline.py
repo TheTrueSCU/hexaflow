@@ -29,7 +29,11 @@ def validate_cart(ctx) -> dict:
 
 
 # Stage 2: Concurrent Processing (Split / Fan-Out)
-@wf.stage("processing", execution_mode=StageExecutionMode.CONCURRENT_ALL, description="Parallel processing.")
+@wf.stage(
+    "processing",
+    execution_mode=StageExecutionMode.CONCURRENT_ALL,
+    description="Parallel processing.",
+)
 @wf.step("authorize_payment", depends_on=["validate_cart"])
 def authorize_payment(ctx) -> dict:
     """Authorize credit card payment."""
@@ -61,7 +65,9 @@ def create_shipment_label(ctx) -> dict:
     payment = ctx.inputs["authorize_payment"]
     inventory = ctx.inputs["reserve_inventory"]
 
-    print(f"  [Step 3] Issuing shipping label from {inventory['warehouse']} (Payment: {payment['transaction_id']})...")
+    print(
+        f"  [Step 3] Issuing shipping label from {inventory['warehouse']} (Payment: {payment['transaction_id']})..."
+    )
     return {
         "tracking_number": "TRK-98127391823",
         "courier": "HexaExpress",

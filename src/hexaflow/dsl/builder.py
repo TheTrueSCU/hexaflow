@@ -39,6 +39,7 @@ class _StepBuilder:
         timeout_seconds: float | None = None,
         is_split: bool = False,
         description: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         self.name = name
         self.stage_name = stage_name
@@ -49,6 +50,7 @@ class _StepBuilder:
         self.timeout_seconds = timeout_seconds
         self.is_split = is_split
         self.description = description
+        self.metadata = metadata or {}
 
     def to_definition(self) -> StepDefinition:
         """Compile into an immutable StepDefinition."""
@@ -61,6 +63,7 @@ class _StepBuilder:
             timeout_seconds=self.timeout_seconds,
             is_split=self.is_split,
             description=self.description,
+            metadata=self.metadata,
         )
 
 
@@ -159,6 +162,7 @@ class Workflow:
         timeout_seconds: float | None = None,
         is_split: bool = False,
         description: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Decorator to register a function or coroutine as an executable workflow step.
 
@@ -193,6 +197,7 @@ class Workflow:
                 timeout_seconds=timeout_seconds,
                 is_split=is_split,
                 description=description,
+                metadata=metadata,
             )
             self._steps.append(builder)
             return fn

@@ -82,3 +82,18 @@ def test_workflow_resume_and_abort_via_dsl() -> None:
     resumed = wf.resume(res_2.run_id)
     assert resumed.status == WorkflowStatus.COMPLETED
     assert resumed.step_checkpoints["step_2"].output_payload == "s2_ok"
+
+
+def test_dsl_step_metadata() -> None:
+    """Validate @wf.step attaches metadata to compiled StepDefinition."""
+    wf = Workflow("meta_wf")
+
+    @wf.stage("gpu_stage")
+    @wf.step("gpu_task", metadata={"gpus": 1, "queue": "high-priority"})
+    def task(ctx):
+        return "gpu_done"
+
+    defn = wf.to_definition()
+    step_defn = defn.get_step("gpu_task")
+    assert step_defn.metadata["gpus"] == 1
+    assert step_defn.metadata["queue"] == "high-priority"

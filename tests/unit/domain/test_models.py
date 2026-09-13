@@ -136,3 +136,11 @@ def test_dependencies_map() -> None:
     dep_map = workflow.dependencies_map()
     assert dep_map["a"] == set()
     assert dep_map["b"] == {"a"}
+
+
+def test_step_metadata_preservation() -> None:
+    """Validate StepDefinition stores and preserves arbitrary execution metadata."""
+    meta = {"resources": {"gpus": 2, "gpu_model": "h100", "ram_mb": 65536}, "tags": ["prod"]}
+    step = StepDefinition(name="gpu_step", action=lambda ctx: None, metadata=meta)
+    assert step.metadata["resources"]["gpus"] == 2
+    assert step.metadata["tags"] == ["prod"]

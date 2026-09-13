@@ -64,6 +64,10 @@ class StepDefinition(BaseModel):
     description: str = Field(
         default="", description="Architectural or business description of the step."
     )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Arbitrary execution metadata (e.g. cluster resources, hardware requirements, tags).",
+    )
 
 
 class StageDefinition(BaseModel):
