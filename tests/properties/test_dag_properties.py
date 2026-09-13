@@ -39,7 +39,10 @@ def test_topological_order_invariant(step_tuples: list[tuple[int, str]]) -> None
         stages_dict.setdefault(stage_id, []).append(step)
         prev_name = name
 
-    stages = [StageDefinition(name=f"stage_{sid}", steps=tuple(steps)) for sid, steps in sorted(stages_dict.items())]
+    stages = [
+        StageDefinition(name=f"stage_{sid}", steps=tuple(steps))
+        for sid, steps in sorted(stages_dict.items())
+    ]
     workflow = WorkflowDefinition(name="fuzzed_workflow", stages=tuple(stages))
 
     order = workflow.topological_order()
@@ -81,7 +84,7 @@ def test_resumption_never_reexecutes_completed_steps(fail_step_idx: int) -> None
         StepDefinition(
             name=f"step_{i}",
             action=make_action(f"step_{i}", i),
-            depends_on=(f"step_{i-1}",) if i > 1 else (),
+            depends_on=(f"step_{i - 1}",) if i > 1 else (),
         )
         for i in range(1, 6)
     ]

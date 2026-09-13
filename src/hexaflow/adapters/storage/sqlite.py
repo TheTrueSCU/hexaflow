@@ -15,7 +15,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from hexaflow.domain.state import CheckpointRecord, StepStatus, WorkflowExecutionState, WorkflowStatus
+from hexaflow.domain.state import (
+    CheckpointRecord,
+    StepStatus,
+    WorkflowExecutionState,
+    WorkflowStatus,
+)
 from hexaflow.ports.storage import WorkflowStateStorePort
 
 
@@ -64,7 +69,7 @@ class SqliteStateStore(WorkflowStateStorePort):
         self._init_db()
 
     @contextmanager
-    def _connection(self) -> Generator[sqlite3.Connection, None, None]:
+    def _connection(self) -> Generator[sqlite3.Connection]:
         """Provide a managed SQLite connection with WAL mode and automatic cleanup."""
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -113,7 +118,9 @@ class SqliteStateStore(WorkflowStateStorePort):
             )
             conn.commit()
 
-    def _serialize_and_spill(self, run_id: str, stage_name: str, step_name: str, payload_type: str, data: Any) -> str | None:
+    def _serialize_and_spill(
+        self, run_id: str, stage_name: str, step_name: str, payload_type: str, data: Any
+    ) -> str | None:
         """Serialize data to JSON, spilling to disk if size exceeds threshold.
 
         Args:
@@ -218,7 +225,9 @@ class SqliteStateStore(WorkflowStateStorePort):
                 error_summary=row["error_summary"],
                 step_checkpoints=step_map,
                 started_at=datetime.fromisoformat(row["started_at"]),
-                finished_at=datetime.fromisoformat(row["finished_at"]) if row["finished_at"] else None,
+                finished_at=datetime.fromisoformat(row["finished_at"])
+                if row["finished_at"]
+                else None,
             )
 
     def save_checkpoint(self, checkpoint: CheckpointRecord) -> None:
@@ -228,10 +237,18 @@ class SqliteStateStore(WorkflowStateStorePort):
             checkpoint: The CheckpointRecord snapshot to store.
         """
         serialized_input = self._serialize_and_spill(
-            checkpoint.run_id, checkpoint.stage_name, checkpoint.step_name, "input", checkpoint.input_payload
+            checkpoint.run_id,
+            checkpoint.stage_name,
+            checkpoint.step_name,
+            "input",
+            checkpoint.input_payload,
         )
         serialized_output = self._serialize_and_spill(
-            checkpoint.run_id, checkpoint.stage_name, checkpoint.step_name, "output", checkpoint.output_payload
+            checkpoint.run_id,
+            checkpoint.stage_name,
+            checkpoint.step_name,
+            "output",
+            checkpoint.output_payload,
         )
 
         with self._lock, self._connection() as conn:
@@ -318,7 +335,9 @@ class SqliteStateStore(WorkflowStateStorePort):
             output_payload=self._deserialize_and_resolve(row["output_payload"]),
             error_traceback=row["error_traceback"],
             started_at=datetime.fromisoformat(row["started_at"]),
-            completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
+            completed_at=datetime.fromisoformat(row["completed_at"])
+            if row["completed_at"]
+            else None,
             duration_seconds=row["duration_seconds"],
         )
 
