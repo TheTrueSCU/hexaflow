@@ -42,6 +42,7 @@ from hexaflow.ports.storage import WorkflowStateStorePort
 __version__ = "0.0.0"
 
 __all__ = [
+    "__version__",
     "AsyncioWorkflowEngine",
     "BackoffType",
     "CheckpointCorruptError",
@@ -67,5 +68,4 @@ __all__ = [
     "WorkflowStateStorePort",
     "WorkflowStatus",
     "WorkflowSuspended",
-    "__version__",
 ]

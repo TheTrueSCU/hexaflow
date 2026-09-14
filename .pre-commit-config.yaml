@@ -33,9 +33,8 @@ repos:
 
   - repo: local
     hooks:
-      - id: ty-check
-        name: ty check
-        entry: uv run ty check src
+      - id: hexaqual-sanity
+        name: hexaqual sanity check
+        entry: uv run hexaqual sanity --skip-tests
         language: system
-        types: [python]
         pass_filenames: false
