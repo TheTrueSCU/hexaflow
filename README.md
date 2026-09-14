@@ -42,11 +42,13 @@ from hexaflow import RetryPolicy, StageExecutionMode, Workflow
 
 wf = Workflow(name="order_pipeline", version="1.0.0")
 
+
 # Stage 1: Validation
 @wf.stage("validation")
 @wf.step("validate_cart", retries=RetryPolicy(max_attempts=3))
 def validate_cart(ctx) -> dict:
     return {"order_id": "ord_101", "total_usd": 150.00}
+
 
 # Stage 2: Parallel Processing (Split / Fan-Out)
 @wf.stage("processing", execution_mode=StageExecutionMode.CONCURRENT_ALL)
@@ -55,16 +57,19 @@ def authorize_payment(ctx) -> dict:
     cart = ctx.inputs["validate_cart"]
     return {"status": "PAID", "amount": cart["total_usd"]}
 
+
 @wf.stage("processing")
 @wf.step("reserve_inventory", depends_on=["validate_cart"])
 def reserve_inventory(ctx) -> dict:
     return {"warehouse": "US-EAST-1", "reserved": True}
+
 
 # Stage 3: Fulfillment (Join Barrier)
 @wf.stage("fulfillment")
 @wf.step("create_shipping_label", depends_on=["authorize_payment", "reserve_inventory"])
 def create_shipping_label(ctx) -> dict:
     return {"tracking_id": "TRK-9812739"}
+
 
 if __name__ == "__main__":
     state = wf.run()

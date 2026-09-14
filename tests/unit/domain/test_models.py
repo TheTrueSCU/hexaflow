@@ -16,8 +16,11 @@ from hexaflow.domain.models import (
     StageDefinition,
     StageExecutionMode,
     StepDefinition,
+    TriggerRule,
     WorkflowDefinition,
+    evaluate_trigger_rule,
 )
+from hexaflow.domain.state import StepStatus
 
 
 def test_valid_multi_stage_workflow_construction() -> None:
@@ -144,3 +147,117 @@ def test_step_metadata_preservation() -> None:
     step = StepDefinition(name="gpu_step", action=lambda ctx: None, metadata=meta)
     assert step.metadata["resources"]["gpus"] == 2
     assert step.metadata["tags"] == ["prod"]
+
+
+def test_step_definition_trigger_rule() -> None:
+    """Validate StepDefinition defaults to ALL_SUCCESS and accepts custom rules."""
+    default_step = StepDefinition(name="default_step", action=lambda ctx: None)
+    assert default_step.trigger_rule == TriggerRule.ALL_SUCCESS
+
+    custom_step = StepDefinition(
+        name="custom_step",
+        action=lambda ctx: None,
+        trigger_rule=TriggerRule.ALL_SUCCESS_OR_SKIPPED,
+    )
+    assert custom_step.trigger_rule == TriggerRule.ALL_SUCCESS_OR_SKIPPED
+
+
+def test_trigger_rules_evaluation() -> None:
+    """Validate evaluation logic across all TriggerRule enum options."""
+    # 0 parents -> always True
+    assert evaluate_trigger_rule(TriggerRule.ALL_SUCCESS, []) is True
+    assert evaluate_trigger_rule(TriggerRule.ALL_SUCCESS_OR_SKIPPED, []) is True
+
+    # ALL_SUCCESS
+    assert (
+        evaluate_trigger_rule(TriggerRule.ALL_SUCCESS, [StepStatus.COMPLETED, StepStatus.COMPLETED])
+        is True
+    )
+    assert (
+        evaluate_trigger_rule(TriggerRule.ALL_SUCCESS, [StepStatus.COMPLETED, StepStatus.SKIPPED])
+        is False
+    )
+    assert (
+        evaluate_trigger_rule(TriggerRule.ALL_SUCCESS, [StepStatus.COMPLETED, StepStatus.FAILED])
+        is False
+    )
+
+    # ALL_FAILED
+    assert (
+        evaluate_trigger_rule(TriggerRule.ALL_FAILED, [StepStatus.FAILED, StepStatus.FAILED])
+        is True
+    )
+    assert (
+        evaluate_trigger_rule(TriggerRule.ALL_FAILED, [StepStatus.COMPLETED, StepStatus.FAILED])
+        is False
+    )
+
+    # ALL_DONE
+    assert (
+        evaluate_trigger_rule(
+            TriggerRule.ALL_DONE, [StepStatus.COMPLETED, StepStatus.FAILED, StepStatus.SKIPPED]
+        )
+        is True
+    )
+
+    # ONE_SUCCESS
+    assert (
+        evaluate_trigger_rule(TriggerRule.ONE_SUCCESS, [StepStatus.FAILED, StepStatus.COMPLETED])
+        is True
+    )
+    assert (
+        evaluate_trigger_rule(TriggerRule.ONE_SUCCESS, [StepStatus.FAILED, StepStatus.SKIPPED])
+        is False
+    )
+
+    # ONE_FAILED
+    assert (
+        evaluate_trigger_rule(TriggerRule.ONE_FAILED, [StepStatus.COMPLETED, StepStatus.FAILED])
+        is True
+    )
+    assert (
+        evaluate_trigger_rule(TriggerRule.ONE_FAILED, [StepStatus.COMPLETED, StepStatus.SKIPPED])
+        is False
+    )
+
+    # NONE_FAILED
+    assert (
+        evaluate_trigger_rule(TriggerRule.NONE_FAILED, [StepStatus.COMPLETED, StepStatus.SKIPPED])
+        is True
+    )
+    assert (
+        evaluate_trigger_rule(TriggerRule.NONE_FAILED, [StepStatus.COMPLETED, StepStatus.FAILED])
+        is False
+    )
+
+    # ALL_SUCCESS_OR_SKIPPED
+    assert (
+        evaluate_trigger_rule(
+            TriggerRule.ALL_SUCCESS_OR_SKIPPED, [StepStatus.COMPLETED, StepStatus.SKIPPED]
+        )
+        is True
+    )
+    assert (
+        evaluate_trigger_rule(
+            TriggerRule.ALL_SUCCESS_OR_SKIPPED, [StepStatus.SKIPPED, StepStatus.SKIPPED]
+        )
+        is True
+    )
+    assert (
+        evaluate_trigger_rule(
+            TriggerRule.ALL_SUCCESS_OR_SKIPPED, [StepStatus.COMPLETED, StepStatus.COMPLETED]
+        )
+        is True
+    )
+    assert (
+        evaluate_trigger_rule(
+            TriggerRule.ALL_SUCCESS_OR_SKIPPED, [StepStatus.COMPLETED, StepStatus.FAILED]
+        )
+        is False
+    )
+    assert (
+        evaluate_trigger_rule(
+            TriggerRule.ALL_SUCCESS_OR_SKIPPED, [StepStatus.SKIPPED, StepStatus.FAILED]
+        )
+        is False
+    )

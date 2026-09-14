@@ -12,6 +12,7 @@ from hexaflow.domain.models import (
     StageDefinition,
     StageExecutionMode,
     StepDefinition,
+    TriggerRule,
     WorkflowDefinition,
 )
 from hexaflow.domain.retry import BackoffType, RetryPolicy
@@ -197,3 +198,78 @@ def test_abort_unwinds_compensations_in_reverse() -> None:
     assert abort_res.status == WorkflowStatus.CANCELLED
     # Reverse order: step 2 compensated before step 1
     assert rollbacks == ["comp_2", "comp_1"]
+
+
+def test_explicit_step_skipping() -> None:
+    """Validate that explicitly skipped steps checkpoint as SKIPPED with 0 duration."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_1 = StepDefinition(name="step_1", action=lambda ctx: "s1_done")
+    wf = WorkflowDefinition(
+        name="skip_test_wf",
+        stages=(StageDefinition(name="stage_1", steps=(step_1,)),),
+    )
+
+    res = engine.run(wf, skip_steps=["step_1"])
+    assert res.status == WorkflowStatus.COMPLETED
+    chk = res.step_checkpoints["step_1"]
+    assert chk.status == StepStatus.SKIPPED
+    assert chk.duration_seconds == 0.0
+    assert chk.output_payload is None
+
+
+def test_all_success_cascades_skip_when_parent_skipped() -> None:
+    """Validate ALL_SUCCESS rule triggers cascade skip when upstream parent is skipped."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_1 = StepDefinition(name="step_1", action=lambda ctx: "s1_done")
+    step_2 = StepDefinition(
+        name="step_2",
+        action=lambda ctx: "s2_done",
+        depends_on=("step_1",),
+        trigger_rule=TriggerRule.ALL_SUCCESS,
+    )
+    wf = WorkflowDefinition(
+        name="cascade_wf",
+        stages=(
+            StageDefinition(name="stage_1", steps=(step_1,)),
+            StageDefinition(name="stage_2", steps=(step_2,)),
+        ),
+    )
+
+    res = engine.run(wf, skip_steps=["step_1"])
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["step_1"].status == StepStatus.SKIPPED
+    # Cascaded skip on step_2
+    assert res.step_checkpoints["step_2"].status == StepStatus.SKIPPED
+    assert res.step_checkpoints["step_2"].duration_seconds == 0.0
+
+
+def test_all_success_or_skipped_runs_when_parent_skipped() -> None:
+    """Validate ALL_SUCCESS_OR_SKIPPED allows step to execute when upstream is skipped."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_1 = StepDefinition(name="step_1", action=lambda ctx: "s1_done")
+    step_2 = StepDefinition(
+        name="step_2",
+        action=lambda ctx: "s2_done",
+        depends_on=("step_1",),
+        trigger_rule=TriggerRule.ALL_SUCCESS_OR_SKIPPED,
+    )
+    wf = WorkflowDefinition(
+        name="pass_through_wf",
+        stages=(
+            StageDefinition(name="stage_1", steps=(step_1,)),
+            StageDefinition(name="stage_2", steps=(step_2,)),
+        ),
+    )
+
+    res = engine.run(wf, skip_steps=["step_1"])
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["step_1"].status == StepStatus.SKIPPED
+    # step_2 executes because trigger rule permits upstream skip!
+    assert res.step_checkpoints["step_2"].status == StepStatus.COMPLETED
+    assert res.step_checkpoints["step_2"].output_payload == "s2_done"

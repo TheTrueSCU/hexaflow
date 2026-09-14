@@ -21,6 +21,7 @@ from hexaflow.domain.models import (
     StageExecutionMode,
     StepDefinition,
     WorkflowDefinition,
+    evaluate_trigger_rule,
 )
 from hexaflow.domain.state import (
     CheckpointRecord,
@@ -54,28 +55,32 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         self,
         workflow: WorkflowDefinition,
         initial_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
     ) -> WorkflowExecutionState:
         """Synchronously execute a workflow definition from start to finish.
 
         Args:
             workflow: Immutable specification of the workflow DAG.
             initial_inputs: Optional dictionary of input arguments.
+            skip_steps: Optional collection of step names to explicitly skip.
 
         Returns:
             Terminal or suspended WorkflowExecutionState.
         """
-        return asyncio.run(self.run_async(workflow, initial_inputs))
+        return asyncio.run(self.run_async(workflow, initial_inputs, skip_steps=skip_steps))
 
     async def run_async(
         self,
         workflow: WorkflowDefinition,
         initial_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
     ) -> WorkflowExecutionState:
         """Asynchronously execute a workflow definition from start to finish.
 
         Args:
             workflow: Immutable specification of the workflow DAG.
             initial_inputs: Optional dictionary of input arguments.
+            skip_steps: Optional collection of step names to explicitly skip.
 
         Returns:
             Terminal or suspended WorkflowExecutionState.
@@ -87,13 +92,15 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             status=WorkflowStatus.RUNNING,
         )
         self._store.save_run(state)
-        return await self._execute_workflow(state, workflow, initial_inputs or {})
+        skipped = set(skip_steps or ())
+        return await self._execute_workflow(state, workflow, initial_inputs or {}, skipped)
 
     def resume(
         self,
         run_id: str,
         workflow: WorkflowDefinition,
         patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
     ) -> WorkflowExecutionState:
         """Synchronously resume a suspended workflow run from its latest checkpoints.
 
@@ -101,17 +108,19 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             run_id: Execution identifier of the suspended workflow run.
             workflow: WorkflowDefinition specification matching the run.
             patch_inputs: Optional override inputs for the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip during resumption.
 
         Returns:
             Updated WorkflowExecutionState outcome.
         """
-        return asyncio.run(self.resume_async(run_id, workflow, patch_inputs))
+        return asyncio.run(self.resume_async(run_id, workflow, patch_inputs, skip_steps=skip_steps))
 
     async def resume_async(
         self,
         run_id: str,
         workflow: WorkflowDefinition,
         patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
     ) -> WorkflowExecutionState:
         """Asynchronously resume a suspended workflow run from its latest checkpoints.
 
@@ -119,6 +128,7 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             run_id: Execution identifier of the suspended workflow run.
             workflow: WorkflowDefinition specification matching the run.
             patch_inputs: Optional override inputs for the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip during resumption.
 
         Returns:
             Updated WorkflowExecutionState outcome.
@@ -132,7 +142,8 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         state.status = WorkflowStatus.RUNNING
         state.error_summary = None
         self._store.save_run(state)
-        return await self._execute_workflow(state, workflow, patch_inputs or {})
+        skipped = set(skip_steps or ())
+        return await self._execute_workflow(state, workflow, patch_inputs or {}, skipped)
 
     def restart(
         self,
@@ -233,9 +244,11 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         state: WorkflowExecutionState,
         workflow: WorkflowDefinition,
         inputs: dict[str, Any],
+        skipped_steps: set[str] | None = None,
     ) -> WorkflowExecutionState:
         """Internal execution loop advancing stages and evaluating DAG dependencies."""
         cached_outputs: dict[str, Any] = {}
+        active_skips = set(skipped_steps or ())
 
         # Re-populate cached outputs from already completed checkpoints (resumption path)
         existing_checkpoints = self._store.get_checkpoints(state.run_id)
@@ -243,13 +256,17 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             state.step_checkpoints[chk.step_name] = chk
             if chk.status == StepStatus.COMPLETED:
                 cached_outputs[chk.step_name] = chk.output_payload
+            elif chk.status == StepStatus.SKIPPED:
+                cached_outputs[chk.step_name] = None
 
         for stage in workflow.stages:
             state.current_stage = stage.name
             self._store.save_run(state)
 
             try:
-                await self._execute_stage(state, stage, workflow, cached_outputs, inputs)
+                await self._execute_stage(
+                    state, stage, workflow, cached_outputs, inputs, active_skips
+                )
             except WorkflowSuspended as suspended_err:
                 state.status = WorkflowStatus.SUSPENDED
                 state.error_summary = str(suspended_err)
@@ -268,16 +285,21 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         workflow: WorkflowDefinition,
         cached_outputs: dict[str, Any],
         initial_inputs: dict[str, Any],
+        skipped_steps: set[str],
     ) -> None:
         """Execute all steps within a single stage according to its execution mode."""
         if stage.execution_mode == StageExecutionMode.SEQUENTIAL:
             for step in stage.steps:
-                res = await self._execute_step(state, stage, step, cached_outputs, initial_inputs)
+                res = await self._execute_step(
+                    state, stage, step, cached_outputs, initial_inputs, skipped_steps
+                )
                 cached_outputs[step.name] = res
         else:
             # CONCURRENT execution for steps in this stage
             tasks = [
-                self._execute_step(state, stage, step, cached_outputs, initial_inputs)
+                self._execute_step(
+                    state, stage, step, cached_outputs, initial_inputs, skipped_steps
+                )
                 for step in stage.steps
             ]
             results = await asyncio.gather(*tasks)
@@ -291,25 +313,72 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         step: StepDefinition,
         cached_outputs: dict[str, Any],
         initial_inputs: dict[str, Any],
+        skipped_steps: set[str],
     ) -> Any:
         """Execute an individual step with checkpoint caching, barrier check, and retries."""
-        # 1. Resumption Check: If step is already COMPLETED, skip execution
+        # 1. Resumption Check: If step is already COMPLETED or SKIPPED, return cached output
         existing_chk = self._store.get_checkpoint(state.run_id, step.name)
-        if existing_chk and existing_chk.status == StepStatus.COMPLETED:
+        if existing_chk and existing_chk.status in (StepStatus.COMPLETED, StepStatus.SKIPPED):
             return existing_chk.output_payload
 
-        # 2. Join Barrier Verification: Ensure all parent dependencies are completed
-        step_inputs: dict[str, Any] = dict(initial_inputs)
+        # 2. Explicit Skip: If step is requested to be skipped, checkpoint as SKIPPED immediately
+        if step.name in skipped_steps:
+            start_time = datetime.now(UTC)
+            chk = CheckpointRecord(
+                run_id=state.run_id,
+                stage_name=stage.name,
+                step_name=step.name,
+                status=StepStatus.SKIPPED,
+                attempt_number=1,
+                input_payload=initial_inputs,
+                output_payload=None,
+                started_at=start_time,
+                completed_at=start_time,
+                duration_seconds=0.0,
+            )
+            self._store.save_checkpoint(chk)
+            state.step_checkpoints[step.name] = chk
+            return None
+
+        # 3. Join Barrier Verification & Trigger Rule Evaluation:
+        parent_statuses: list[StepStatus] = []
         for dep in step.depends_on:
-            if dep not in cached_outputs:
+            dep_chk = state.step_checkpoints.get(dep) or self._store.get_checkpoint(
+                state.run_id, dep
+            )
+            if not dep_chk:
                 raise WorkflowSuspended(
                     run_id=state.run_id,
                     failed_step=step.name,
-                    reason=f"Join barrier unsatisfied: parent step '{dep}' not completed.",
+                    reason=f"Join barrier unsatisfied: parent step '{dep}' not completed or evaluated.",
                 )
-            step_inputs[dep] = cached_outputs[dep]
+            parent_statuses.append(dep_chk.status)
 
-        # 3. Execution & Transient Retry Loop
+        # Evaluate trigger rule against parent statuses
+        if not evaluate_trigger_rule(step.trigger_rule, parent_statuses):
+            start_time = datetime.now(UTC)
+            chk = CheckpointRecord(
+                run_id=state.run_id,
+                stage_name=stage.name,
+                step_name=step.name,
+                status=StepStatus.SKIPPED,
+                attempt_number=1,
+                input_payload=initial_inputs,
+                output_payload=None,
+                started_at=start_time,
+                completed_at=start_time,
+                duration_seconds=0.0,
+            )
+            self._store.save_checkpoint(chk)
+            state.step_checkpoints[step.name] = chk
+            return None
+
+        # 4. Resolve Step Inputs
+        step_inputs: dict[str, Any] = dict(initial_inputs)
+        for dep in step.depends_on:
+            step_inputs[dep] = cached_outputs.get(dep)
+
+        # 5. Execution & Transient Retry Loop
         attempt = 1
         policy = step.retry_policy
         start_time = datetime.now(UTC)

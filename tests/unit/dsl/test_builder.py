@@ -6,8 +6,8 @@ Notes/Architectural Intent:
 """
 
 from hexaflow.adapters.storage.in_memory import InMemoryStateStore
-from hexaflow.domain.models import StageExecutionMode
-from hexaflow.domain.state import WorkflowStatus
+from hexaflow.domain.models import StageExecutionMode, TriggerRule
+from hexaflow.domain.state import StepStatus, WorkflowStatus
 from hexaflow.dsl.builder import Workflow
 
 
@@ -97,3 +97,42 @@ def test_dsl_step_metadata() -> None:
     step_defn = defn.get_step("gpu_task")
     assert step_defn.metadata["gpus"] == 1
     assert step_defn.metadata["queue"] == "high-priority"
+
+
+def test_dsl_trigger_rule_and_skipping() -> None:
+    """Validate trigger_rule and skip_steps work seamlessly through Workflow DSL."""
+    store = InMemoryStateStore()
+    wf = Workflow("skip_wf", state_store=store)
+
+    @wf.step("step_1")
+    def s1():
+        return "s1_val"
+
+    @wf.step("step_2", depends_on=["step_1"], trigger_rule=TriggerRule.ALL_SUCCESS_OR_SKIPPED)
+    def s2():
+        return "s2_val"
+
+    definition = wf.to_definition()
+    assert definition.get_step("step_2").trigger_rule == TriggerRule.ALL_SUCCESS_OR_SKIPPED
+
+    # Run skipping step_1
+    res = wf.run(skip_steps=["step_1"])
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["step_1"].status == StepStatus.SKIPPED
+    assert res.step_checkpoints["step_2"].status == StepStatus.COMPLETED
+    assert res.step_checkpoints["step_2"].output_payload == "s2_val"
+
+
+def test_dsl_create_cli_binder() -> None:
+    """Validate Workflow.create_cli_binder returns a bound WorkflowCliBinder."""
+    wf = Workflow("binder_wf")
+
+    @wf.step("lint")
+    def _lint():
+        return "lint_ok"
+
+    binder = wf.create_cli_binder(aliases={"lint": ["--skip-l"]})
+    assert binder.step_names == ["lint"]
+    spec = binder.get_spec("lint")
+    assert spec is not None
+    assert "--skip-l" in spec.cli_flags

@@ -10,4 +10,4 @@ import hexaflow
 def test_version_defined() -> None:
     """Validate version string is present."""
     version = hexaflow.__version__
-    assert version == "0.1.1"
+    assert version == "0.2.0"

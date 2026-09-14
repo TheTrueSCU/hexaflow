@@ -16,6 +16,7 @@ from hexaflow.domain.models import (
     StageDefinition,
     StageExecutionMode,
     StepDefinition,
+    TriggerRule,
     WorkflowDefinition,
 )
 from hexaflow.domain.retry import RetryPolicy
@@ -33,6 +34,7 @@ class _StepBuilder:
         stage_name: str,
         action: Any,
         depends_on: tuple[str, ...] = (),
+        trigger_rule: TriggerRule = TriggerRule.ALL_SUCCESS,
         retry_policy: RetryPolicy | None = None,
         retries: RetryPolicy | None = None,
         compensation: Any | None = None,
@@ -45,6 +47,7 @@ class _StepBuilder:
         self.stage_name = stage_name
         self.action = action
         self.depends_on = depends_on
+        self.trigger_rule = trigger_rule
         self.retry_policy = retry_policy
         self.compensation = compensation
         self.timeout_seconds = timeout_seconds
@@ -59,6 +62,7 @@ class _StepBuilder:
             action=self.action,
             compensation=self.compensation,
             depends_on=self.depends_on,
+            trigger_rule=self.trigger_rule,
             retry_policy=self.retry_policy,
             timeout_seconds=self.timeout_seconds,
             is_split=self.is_split,
@@ -156,6 +160,7 @@ class Workflow:
         name: str,
         stage: str | None = None,
         depends_on: tuple[str, ...] | list[str] = (),
+        trigger_rule: TriggerRule = TriggerRule.ALL_SUCCESS,
         retry_policy: RetryPolicy | None = None,
         retries: RetryPolicy | None = None,
         compensation: Any | None = None,
@@ -170,6 +175,7 @@ class Workflow:
             name: Unique identifier for this step.
             stage: Enclosing stage name (defaults to current active stage or 'default').
             depends_on: Prerequisite step names for join barriers.
+            trigger_rule: Trigger rule evaluated against direct upstream dependencies.
             retry_policy: Optional transient retry policy.
             compensation: Optional rollback callable.
             timeout_seconds: Maximum execution time.
@@ -192,6 +198,7 @@ class Workflow:
                 stage_name=target_stage,
                 action=fn,
                 depends_on=deps,
+                trigger_rule=trigger_rule,
                 retry_policy=active_policy,
                 compensation=compensation,
                 timeout_seconds=timeout_seconds,
@@ -237,61 +244,79 @@ class Workflow:
             description=self.description,
         )
 
-    def run(self, initial_inputs: dict[str, Any] | None = None) -> WorkflowExecutionState:
+    def run(
+        self,
+        initial_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
+    ) -> WorkflowExecutionState:
         """Synchronously execute the workflow from start to finish.
 
         Args:
             initial_inputs: Optional dictionary of inputs for root steps.
+            skip_steps: Optional collection of step names to explicitly skip.
 
         Returns:
             Final or suspended WorkflowExecutionState.
         """
         definition = self.to_definition()
-        return self._engine.run(definition, initial_inputs)
+        return self._engine.run(definition, initial_inputs, skip_steps=skip_steps)
 
     async def run_async(
-        self, initial_inputs: dict[str, Any] | None = None
+        self,
+        initial_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
     ) -> WorkflowExecutionState:
         """Asynchronously execute the workflow from start to finish.
 
         Args:
             initial_inputs: Optional dictionary of inputs for root steps.
+            skip_steps: Optional collection of step names to explicitly skip.
 
         Returns:
             Final or suspended WorkflowExecutionState.
         """
         definition = self.to_definition()
-        return await self._engine.run_async(definition, initial_inputs)
+        return await self._engine.run_async(definition, initial_inputs, skip_steps=skip_steps)
 
     def resume(
-        self, run_id: str, patch_inputs: dict[str, Any] | None = None
+        self,
+        run_id: str,
+        patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
     ) -> WorkflowExecutionState:
         """Synchronously resume a suspended workflow run from its latest checkpoints.
 
         Args:
             run_id: Execution identifier of the suspended workflow run.
             patch_inputs: Optional override inputs for resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip during resumption.
 
         Returns:
             Updated WorkflowExecutionState outcome.
         """
         definition = self.to_definition()
-        return self._engine.resume(run_id, definition, patch_inputs)
+        return self._engine.resume(run_id, definition, patch_inputs, skip_steps=skip_steps)
 
     async def resume_async(
-        self, run_id: str, patch_inputs: dict[str, Any] | None = None
+        self,
+        run_id: str,
+        patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
     ) -> WorkflowExecutionState:
         """Asynchronously resume a suspended workflow run from its latest checkpoints.
 
         Args:
             run_id: Execution identifier of the suspended workflow run.
             patch_inputs: Optional override inputs for resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip during resumption.
 
         Returns:
             Updated WorkflowExecutionState outcome.
         """
         definition = self.to_definition()
-        return await self._engine.resume_async(run_id, definition, patch_inputs)
+        return await self._engine.resume_async(
+            run_id, definition, patch_inputs, skip_steps=skip_steps
+        )
 
     def restart(self, run_id: str) -> WorkflowExecutionState:
         """Synchronously restart a workflow execution run from the beginning.
@@ -340,6 +365,22 @@ class Workflow:
         """
         definition = self.to_definition()
         return await self._engine.abort_async(run_id, definition)
+
+    def create_cli_binder(self, aliases: dict[str, list[str]] | None = None) -> Any:
+        """Create a WorkflowCliBinder introspecting this workflow.
+
+        Args:
+            aliases: Optional mapping of step_name to additional CLI flag strings.
+
+        Returns:
+            WorkflowCliBinder instance bound to this workflow.
+
+        Notes/Architectural Intent:
+            Enables seamless generation of --skip-<step> CLI switches from the workflow DAG.
+        """
+        from hexaflow.cli.binder import WorkflowCliBinder
+
+        return WorkflowCliBinder(self, aliases=aliases)
 
 
 __all__ = [

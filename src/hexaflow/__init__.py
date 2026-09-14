@@ -8,6 +8,7 @@ Notes/Architectural Intent:
 from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
 from hexaflow.adapters.storage.in_memory import InMemoryStateStore
 from hexaflow.adapters.storage.sqlite import SqliteStateStore
+from hexaflow.cli.binder import CliOptionSpec, WorkflowCliBinder
 from hexaflow.domain.exceptions import (
     CheckpointCorruptError,
     DuplicateStepError,
@@ -22,7 +23,9 @@ from hexaflow.domain.models import (
     StageDefinition,
     StageExecutionMode,
     StepDefinition,
+    TriggerRule,
     WorkflowDefinition,
+    evaluate_trigger_rule,
 )
 from hexaflow.domain.retry import (
     BackoffType,
@@ -39,7 +42,7 @@ from hexaflow.dsl.builder import Workflow
 from hexaflow.ports.engine import WorkflowEnginePort
 from hexaflow.ports.storage import WorkflowStateStorePort
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 __all__ = [
     "__version__",
@@ -47,7 +50,9 @@ __all__ = [
     "BackoffType",
     "CheckpointCorruptError",
     "CheckpointRecord",
+    "CliOptionSpec",
     "DuplicateStepError",
+    "evaluate_trigger_rule",
     "InMemoryStateStore",
     "InvalidWorkflowDAGError",
     "RetryPolicy",
@@ -59,8 +64,10 @@ __all__ = [
     "StepFailedError",
     "StepNotFoundError",
     "StepStatus",
+    "TriggerRule",
     "Workflow",
     "WorkflowAborted",
+    "WorkflowCliBinder",
     "WorkflowDefinition",
     "WorkflowEnginePort",
     "WorkflowError",

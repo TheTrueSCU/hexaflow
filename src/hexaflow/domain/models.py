@@ -18,6 +18,64 @@ from hexaflow.domain.exceptions import (
     StepNotFoundError,
 )
 from hexaflow.domain.retry import RetryPolicy
+from hexaflow.domain.state import StepStatus
+
+
+class TriggerRule(StrEnum):
+    """Execution prerequisite rule evaluated against direct upstream dependencies.
+
+    Notes/Architectural Intent:
+        Governs whether a step executes, cascades skip, or halts execution
+        based on the terminal states of its direct upstream dependencies.
+    """
+
+    ALL_SUCCESS = "ALL_SUCCESS"
+    ALL_FAILED = "ALL_FAILED"
+    ALL_DONE = "ALL_DONE"
+    ONE_SUCCESS = "ONE_SUCCESS"
+    ONE_FAILED = "ONE_FAILED"
+    NONE_FAILED = "NONE_FAILED"
+    ALL_SUCCESS_OR_SKIPPED = "ALL_SUCCESS_OR_SKIPPED"
+
+
+def evaluate_trigger_rule(rule: TriggerRule, parent_statuses: list[StepStatus]) -> bool:
+    """Evaluate whether a trigger rule is satisfied given upstream parent statuses.
+
+    Args:
+        rule: The TriggerRule policy to evaluate.
+        parent_statuses: List of terminal StepStatus values for all direct parents.
+
+    Returns:
+        True if the trigger condition is satisfied and step should execute;
+        False if the trigger rule is violated and the step should cascade skip.
+
+    Notes/Architectural Intent:
+        Implements deterministic DAG barrier evaluation without side effects.
+        If a step has no parents, all rules evaluate to True.
+    """
+    if not parent_statuses:
+        return True
+
+    successes = sum(1 for s in parent_statuses if s == StepStatus.COMPLETED)
+    failures = sum(1 for s in parent_statuses if s == StepStatus.FAILED)
+    skips = sum(1 for s in parent_statuses if s == StepStatus.SKIPPED)
+    total = len(parent_statuses)
+
+    match rule:
+        case TriggerRule.ALL_SUCCESS:
+            return successes == total
+        case TriggerRule.ALL_FAILED:
+            return failures == total
+        case TriggerRule.ALL_DONE:
+            return (successes + failures + skips) == total
+        case TriggerRule.ONE_SUCCESS:
+            return successes > 0
+        case TriggerRule.ONE_FAILED:
+            return failures > 0
+        case TriggerRule.NONE_FAILED:
+            return failures == 0
+        case TriggerRule.ALL_SUCCESS_OR_SKIPPED:
+            return failures == 0 and (successes + skips) == total
 
 
 class StageExecutionMode(StrEnum):
@@ -38,7 +96,7 @@ class StepDefinition(BaseModel):
 
     Notes/Architectural Intent:
         Pairs an executable action with its optional rollback compensation, retry policy,
-        timeout bounds, and prerequisite dependency names for join barriers.
+        timeout bounds, prerequisite dependency names, and upstream trigger rule for join barriers.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
@@ -50,6 +108,10 @@ class StepDefinition(BaseModel):
     )
     depends_on: tuple[str, ...] = Field(
         default_factory=tuple, description="Prerequisite step names required before execution."
+    )
+    trigger_rule: TriggerRule = Field(
+        default=TriggerRule.ALL_SUCCESS,
+        description="Rule evaluating direct upstream dependencies before execution.",
     )
     retry_policy: RetryPolicy | None = Field(
         default=None, description="Optional transient retry configuration."
@@ -240,8 +302,10 @@ class WorkflowDefinition(BaseModel):
 
 
 __all__ = [
+    "evaluate_trigger_rule",
     "StageDefinition",
     "StageExecutionMode",
     "StepDefinition",
+    "TriggerRule",
     "WorkflowDefinition",
 ]

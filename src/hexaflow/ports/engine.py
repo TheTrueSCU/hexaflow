@@ -25,12 +25,14 @@ class WorkflowEnginePort(ABC):
         self,
         workflow: WorkflowDefinition,
         initial_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
     ) -> WorkflowExecutionState:
         """Synchronously execute a workflow definition from start to finish.
 
         Args:
             workflow: Immutable specification of the workflow DAG.
             initial_inputs: Optional dictionary of input arguments passed to root steps.
+            skip_steps: Optional collection of step names to explicitly skip.
 
         Returns:
             Final or suspended WorkflowExecutionState outcome.
@@ -41,12 +43,14 @@ class WorkflowEnginePort(ABC):
         self,
         workflow: WorkflowDefinition,
         initial_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
     ) -> WorkflowExecutionState:
         """Asynchronously execute a workflow definition from start to finish.
 
         Args:
             workflow: Immutable specification of the workflow DAG.
             initial_inputs: Optional dictionary of input arguments passed to root steps.
+            skip_steps: Optional collection of step names to explicitly skip.
 
         Returns:
             Final or suspended WorkflowExecutionState outcome.
@@ -58,6 +62,7 @@ class WorkflowEnginePort(ABC):
         run_id: str,
         workflow: WorkflowDefinition,
         patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
     ) -> WorkflowExecutionState:
         """Synchronously resume a suspended workflow run from its latest checkpoints.
 
@@ -65,6 +70,7 @@ class WorkflowEnginePort(ABC):
             run_id: Execution identifier of the suspended workflow run.
             workflow: WorkflowDefinition specification matching the run.
             patch_inputs: Optional override inputs to apply to the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip during resumption.
 
         Returns:
             Updated WorkflowExecutionState outcome.
@@ -76,6 +82,7 @@ class WorkflowEnginePort(ABC):
         run_id: str,
         workflow: WorkflowDefinition,
         patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
     ) -> WorkflowExecutionState:
         """Asynchronously resume a suspended workflow run from its latest checkpoints.
 
@@ -83,6 +90,7 @@ class WorkflowEnginePort(ABC):
             run_id: Execution identifier of the suspended workflow run.
             workflow: WorkflowDefinition specification matching the run.
             patch_inputs: Optional override inputs to apply to the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip during resumption.
 
         Returns:
             Updated WorkflowExecutionState outcome.
