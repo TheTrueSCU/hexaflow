@@ -39,7 +39,7 @@ from hexaflow.dsl.builder import Workflow
 from hexaflow.ports.engine import WorkflowEnginePort
 from hexaflow.ports.storage import WorkflowStateStorePort
 
-__version__ = "0.0.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "__version__",
