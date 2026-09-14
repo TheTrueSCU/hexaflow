@@ -7,6 +7,8 @@ Notes/Architectural Intent:
 
 from __future__ import annotations
 
+import re
+
 import typer
 from typer.testing import CliRunner
 
@@ -146,8 +148,9 @@ def test_binder_apply_typer_decorator() -> None:
     # 4. Help text shows injected options
     res = runner.invoke(app, ["--help"])
     assert res.exit_code == 0
-    assert "--skip-lint" in res.stdout
-    assert "--skip-type-check" in res.stdout
-    assert "--skip-ty" in res.stdout
-    assert "--skip-unit-tests" in res.stdout
-    assert "--skip-tests" in res.stdout
+    clean_stdout = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", res.stdout)
+    assert "--skip-lint" in clean_stdout
+    assert "--skip-type-check" in clean_stdout
+    assert "--skip-ty" in clean_stdout
+    assert "--skip-unit-tests" in clean_stdout
+    assert "--skip-tests" in clean_stdout
