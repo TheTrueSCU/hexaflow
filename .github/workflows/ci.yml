@@ -108,3 +108,38 @@ jobs:
 
       - name: Run Hypothesis Fuzzing
         run: uv run hexaqual test run -P
+
+  # =========================================================================
+  # Stage 4: Unified CI Success Status Check (Branch Protection Gate)
+  # Aggregates results of all upstream stages, handling skipped conditional jobs
+  # =========================================================================
+  ci-success:
+    name: CI Success (All Required Checks)
+    needs:
+      - quality-gate
+      - test-suite
+      - hypothesis-fuzzing
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify All Upstream Jobs Succeeded or Skipped
+        run: |
+          echo "Evaluating CI pipeline status:"
+          echo "  Pre-Commit Quality Gate:      ${{ needs.quality-gate.result }}"
+          echo "  Unit & Integration Tests:     ${{ needs.test-suite.result }}"
+          echo "  Property-Based Fuzzing:       ${{ needs.hypothesis-fuzzing.result }}"
+
+          results=(
+            "${{ needs.quality-gate.result }}"
+            "${{ needs.test-suite.result }}"
+            "${{ needs.hypothesis-fuzzing.result }}"
+          )
+
+          for res in "${results[@]}"; do
+            if [ "$res" = "failure" ] || [ "$res" = "cancelled" ]; then
+              echo "::error::One or more upstream CI jobs failed or were cancelled."
+              exit 1
+            fi
+          done
+
+          echo "🎉 All required CI jobs completed successfully (or were cleanly skipped)."
