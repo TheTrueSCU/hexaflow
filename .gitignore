@@ -37,3 +37,6 @@ htmlcov/
 
 # Hexaflow state & artifacts
 .hexaflow/
+
+# Documentation
+site/
