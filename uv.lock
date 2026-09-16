@@ -351,7 +351,7 @@ wheels = [
 
 [[package]]
 name = "hexaflow"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
@@ -381,7 +381,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "hexaqual", extras = ["all"], specifier = ">=0.2.0" },
+    { name = "hexaqual", extras = ["all"], specifier = ">=0.3.0" },
     { name = "hypothesis", specifier = ">=6.168.0" },
     { name = "pre-commit", specifier = ">=4.6.2" },
     { name = "pytest", specifier = ">=9.1.1" },
@@ -394,7 +394,7 @@ dev = [
 
 [[package]]
 name = "hexaqual"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "complexipy" },
@@ -411,9 +411,9 @@ dependencies = [
     { name = "rich" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fc/e6/f0dc404badbd83d4b93b4abfa5c21d5d3252919e2e5df5bfea5a6f7e7dba/hexaqual-0.2.0.tar.gz", hash = "sha256:cd070904075b2fa2dd7f8fc6db9b3e29e4bb77094e03840af2c0ea99a488aea7", size = 263449, upload-time = "2026-09-14T03:16:53.464Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/6c/123ca32f1a18d6bc3a4727af8edcfc9e57f29cdad686ef51e4db6a54cd18/hexaqual-0.3.0.tar.gz", hash = "sha256:34c98a0ac9476ad6686a1a0e064bcbb3936c6a8976ed60b881bed54a2234bc5a", size = 281524, upload-time = "2026-09-14T15:31:43.182Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2f/38/d276adf861371ea11324fc870d4cdd01b9e1e63717a6a5e24b09081facab/hexaqual-0.2.0-py3-none-any.whl", hash = "sha256:28210abc8f340bbb3ea119010828de88855370ec526c035fd66846abacd01e78", size = 199954, upload-time = "2026-09-14T03:16:51.772Z" },
+    { url = "https://files.pythonhosted.org/packages/93/c5/0f77455d8f41ff566520b49f6b715131a0c1bba6b5429137535e59e8193e/hexaqual-0.3.0-py3-none-any.whl", hash = "sha256:27cdec265c4a856b6cb3f0b8f0738bd02113aa1e596ebf0972b2284bb85cab7c", size = 210320, upload-time = "2026-09-14T15:31:41.697Z" },
 ]
 
 [package.optional-dependencies]

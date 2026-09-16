@@ -123,6 +123,18 @@ class StepDefinition(BaseModel):
         default=False,
         description="True if output should be fanned out across parallel worker instances.",
     )
+    is_mapped: bool = Field(
+        default=False,
+        description="True if this step dynamically maps over a runtime collection.",
+    )
+    map_over: str | None = Field(
+        default=None,
+        description="Name of upstream step or context key providing the iterable to map over.",
+    )
+    concurrency_limit: int | None = Field(
+        default=None,
+        description="Optional maximum concurrent instances for mapped execution.",
+    )
     description: str = Field(
         default="", description="Architectural or business description of the step."
     )
@@ -299,6 +311,105 @@ class WorkflowDefinition(BaseModel):
             Dictionary mapping each step name to the set of step names it depends on.
         """
         return {step.name: set(step.depends_on) for stage in self.stages for step in stage.steps}
+
+    def to_mermaid(self, direction: str = "TD") -> str:
+        """Render the workflow DAG as a Mermaid flowchart definition.
+
+        Args:
+            direction: Flowchart orientation ('TD', 'LR', 'BT', 'RL'). Defaults to 'TD'.
+
+        Returns:
+            Mermaid flowchart markdown string.
+
+        Notes/Architectural Intent:
+            Encloses stages in subgraphs, applies distinct styling for split and dynamically
+            mapped steps, and annotates non-default trigger rules on dependency edges.
+        """
+        lines: list[str] = [f"graph {direction}"]
+
+        for i, stage in enumerate(self.stages):
+            stage_id = f"stage_{i}_{_mermaid_node_id(stage.name)}"
+            lines.append(f'    subgraph {stage_id} ["{stage.name} ({stage.execution_mode.value})"]')
+            for step in stage.steps:
+                lines.append(f"        {_format_mermaid_step_node(step)}")
+            lines.append("    end")
+
+        for stage in self.stages:
+            for step in stage.steps:
+                target_id = _mermaid_node_id(step.name)
+                for dep in step.depends_on:
+                    dep_id = _mermaid_node_id(dep)
+                    if step.trigger_rule != TriggerRule.ALL_SUCCESS:
+                        lines.append(f"    {dep_id} -->|{step.trigger_rule.value}| {target_id}")
+                    else:
+                        lines.append(f"    {dep_id} --> {target_id}")
+
+        return "\n".join(lines)
+
+    def to_ascii(self) -> str:
+        """Render the workflow DAG as a formatted ASCII/Unicode hierarchical tree.
+
+        Returns:
+            Formatted multiline string illustrating stages, steps, dependencies, and mapping.
+
+        Notes/Architectural Intent:
+            Provides zero-dependency, human-readable terminal and log output of workflow topology.
+        """
+        lines: list[str] = [f"Workflow: {self.name} (v{self.version})"]
+        total_stages = len(self.stages)
+
+        for stage_idx, stage in enumerate(self.stages):
+            is_last_stage = stage_idx == total_stages - 1
+            stage_prefix = "└── " if is_last_stage else "├── "
+            child_indent = "    " if is_last_stage else "│   "
+
+            lines.append(f"{stage_prefix}Stage: {stage.name} ({stage.execution_mode.value})")
+            total_steps = len(stage.steps)
+
+            for step_idx, step in enumerate(stage.steps):
+                is_last_step = step_idx == total_steps - 1
+                lines.append(_format_ascii_step(step, is_last_step, child_indent))
+
+        return "\n".join(lines)
+
+
+def _format_ascii_step(step: StepDefinition, is_last_step: bool, child_indent: str) -> str:
+    """Format an individual step node into an ASCII tree entry."""
+    step_prefix = "└── " if is_last_step else "├── "
+
+    tag = "[step]"
+    if step.is_mapped:
+        tag = f"[mapped: {step.map_over}]"
+    elif step.is_split:
+        tag = "[split]"
+
+    extras: list[str] = []
+    if step.depends_on:
+        extras.append(f"depends on: {', '.join(step.depends_on)}")
+    if step.trigger_rule != TriggerRule.ALL_SUCCESS:
+        extras.append(f"rule: {step.trigger_rule.value}")
+    if step.concurrency_limit is not None:
+        extras.append(f"concurrency: {step.concurrency_limit}")
+
+    extra_str = f" ({'; '.join(extras)})" if extras else ""
+    return f"{child_indent}{step_prefix}{tag} {step.name}{extra_str}"
+
+
+def _mermaid_node_id(name: str) -> str:
+    """Sanitize a name into a valid alphanumeric Mermaid node identifier."""
+    return "".join(c if c.isalnum() or c == "_" else "_" for c in name)
+
+
+def _format_mermaid_step_node(step: StepDefinition) -> str:
+    """Format an individual step node definition in Mermaid syntax."""
+    node_id = _mermaid_node_id(step.name)
+    label = step.name.replace('"', '\\"')
+    if step.is_mapped:
+        over = step.map_over or "runtime"
+        return f'{node_id}[["{label} [mapped: {over}]"]]'
+    if step.is_split:
+        return f'{node_id}{{"{label} [split]"}}'
+    return f'{node_id}["{label}"]'
 
 
 __all__ = [

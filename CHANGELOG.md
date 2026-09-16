@@ -5,7 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-16
+
+### Added
+- **Dynamic Step Mapping (`@wf.map_step`)**:
+  - Runtime fan-out decorator allowing a step to dynamically map over a collection produced by an upstream step or context input.
+  - Automatic dependency inference linking mapped steps to their upstream targets.
+  - Granular concurrency throttling via `concurrency_limit` parameter.
+  - Flexible callable signature binding (supporting `(item)`, `(item, ctx)`, `(ctx, item)`, and context keyword arguments).
+  - Sub-step checkpoint isolation (`<step>[<i>]`) supporting individual retries, timeouts, and seamless resumption skipping previously completed items.
+- **DAG Exporters**:
+  - `WorkflowDefinition.to_mermaid(direction="TD")` and `Workflow.to_mermaid()` for rendering valid Mermaid flowcharts clustered by stage with rule and mapped node annotations.
+  - `WorkflowDefinition.to_ascii()` and `Workflow.to_ascii()` for rendering clean Unicode hierarchical trees for terminal and dashboard output.
+- **Governance**:
+  - Upgraded dev dependencies to `hexaqual[all]>=0.3.0` and unified pre-commit hook configuration.
+
 ## [0.2.0] - 2026-09-14
+
 
 ### Added
 - `TriggerRule` enum supporting `ALL_SUCCESS`, `ALL_FAILED`, `ALL_DONE`, `ONE_SUCCESS`, `ONE_FAILED`, `NONE_FAILED`, and `ALL_SUCCESS_OR_SKIPPED`.

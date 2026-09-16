@@ -261,3 +261,65 @@ def test_trigger_rules_evaluation() -> None:
         )
         is False
     )
+
+
+def test_step_definition_mapping_attributes() -> None:
+    """Validate StepDefinition mapped step attributes."""
+    step = StepDefinition(
+        name="process_item",
+        action=lambda item: item * 2,
+        is_mapped=True,
+        map_over="items",
+        concurrency_limit=5,
+    )
+    assert step.is_mapped is True
+    assert step.map_over == "items"
+    assert step.concurrency_limit == 5
+
+
+def test_workflow_to_mermaid_and_ascii() -> None:
+    """Validate to_mermaid and to_ascii rendering across stages, steps, and rules."""
+    step_a = StepDefinition(name="fetch_items", action=lambda ctx: [1, 2, 3], is_split=True)
+    step_b = StepDefinition(
+        name="transform",
+        action=lambda item: item * 10,
+        depends_on=("fetch_items",),
+        is_mapped=True,
+        map_over="fetch_items",
+        concurrency_limit=3,
+    )
+    step_c = StepDefinition(
+        name="report",
+        action=lambda ctx: "done",
+        depends_on=("transform",),
+        trigger_rule=TriggerRule.ONE_SUCCESS,
+    )
+
+    stage_1 = StageDefinition(name="source", steps=(step_a,))
+    stage_2 = StageDefinition(
+        name="compute", steps=(step_b, step_c), execution_mode=StageExecutionMode.CONCURRENT_ALL
+    )
+
+    workflow = WorkflowDefinition(
+        name="etl_pipeline",
+        stages=(stage_1, stage_2),
+        version="2.0.0",
+    )
+
+    mermaid_td = workflow.to_mermaid()
+    assert mermaid_td.startswith("graph TD")
+    assert "subgraph" in mermaid_td
+    assert "fetch_items" in mermaid_td
+    assert "transform [mapped: fetch_items]" in mermaid_td
+    assert "-->|ONE_SUCCESS|" in mermaid_td
+
+    mermaid_lr = workflow.to_mermaid(direction="LR")
+    assert mermaid_lr.startswith("graph LR")
+
+    ascii_rep = workflow.to_ascii()
+    assert "Workflow: etl_pipeline (v2.0.0)" in ascii_rep
+    assert "Stage: source (SEQUENTIAL)" in ascii_rep
+    assert "[split] fetch_items" in ascii_rep
+    assert "[mapped: fetch_items] transform" in ascii_rep
+    assert "concurrency: 3" in ascii_rep
+    assert "rule: ONE_SUCCESS" in ascii_rep

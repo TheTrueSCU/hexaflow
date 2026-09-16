@@ -273,3 +273,356 @@ def test_all_success_or_skipped_runs_when_parent_skipped() -> None:
     # step_2 executes because trigger rule permits upstream skip!
     assert res.step_checkpoints["step_2"].status == StepStatus.COMPLETED
     assert res.step_checkpoints["step_2"].output_payload == "s2_done"
+
+
+async def test_mapped_step_execution_async_fanout() -> None:
+    """Validate async mapped step fanning out over upstream list."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_1 = StepDefinition(name="fetch", action=lambda ctx: ["alpha", "beta", "gamma"])
+
+    async def _process(item: str) -> str:
+        return item.upper()
+
+    step_map = StepDefinition(
+        name="uppercase",
+        action=_process,
+        depends_on=("fetch",),
+        is_mapped=True,
+        map_over="fetch",
+    )
+
+    wf = WorkflowDefinition(
+        name="mapped_wf",
+        stages=(
+            StageDefinition(name="stage_1", steps=(step_1,)),
+            StageDefinition(name="stage_2", steps=(step_map,)),
+        ),
+    )
+
+    res = await engine.run_async(wf)
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["uppercase"].output_payload == ["ALPHA", "BETA", "GAMMA"]
+    assert "uppercase[0]" in res.step_checkpoints
+    assert res.step_checkpoints["uppercase[0]"].output_payload == "ALPHA"
+    assert "uppercase[1]" in res.step_checkpoints
+    assert res.step_checkpoints["uppercase[1]"].output_payload == "BETA"
+    assert "uppercase[2]" in res.step_checkpoints
+    assert res.step_checkpoints["uppercase[2]"].output_payload == "GAMMA"
+
+
+async def test_mapped_step_concurrency_limit() -> None:
+    """Validate mapped step respects concurrency_limit semaphore."""
+    import asyncio
+
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    active_count = 0
+    max_active = 0
+
+    async def _worker(item: int) -> int:
+        nonlocal active_count, max_active
+        active_count += 1
+        max_active = max(max_active, active_count)
+        await asyncio.sleep(0.02)
+        active_count -= 1
+        return item * 10
+
+    step_1 = StepDefinition(name="source", action=lambda ctx: [1, 2, 3, 4, 5])
+    step_map = StepDefinition(
+        name="parallel_task",
+        action=_worker,
+        depends_on=("source",),
+        is_mapped=True,
+        map_over="source",
+        concurrency_limit=2,
+    )
+
+    wf = WorkflowDefinition(
+        name="throttled_wf",
+        stages=(
+            StageDefinition(name="stage_1", steps=(step_1,)),
+            StageDefinition(name="stage_2", steps=(step_map,)),
+        ),
+    )
+
+    res = await engine.run_async(wf)
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["parallel_task"].output_payload == [10, 20, 30, 40, 50]
+    assert max_active <= 2
+
+
+def test_mapped_step_empty_collection() -> None:
+    """Validate mapped step gracefully handles an empty collection."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_1 = StepDefinition(name="source", action=lambda ctx: [])
+    step_map = StepDefinition(
+        name="mapper",
+        action=lambda item: item,
+        depends_on=("source",),
+        is_mapped=True,
+        map_over="source",
+    )
+
+    wf = WorkflowDefinition(
+        name="empty_wf",
+        stages=(
+            StageDefinition(name="stage_1", steps=(step_1,)),
+            StageDefinition(name="stage_2", steps=(step_map,)),
+        ),
+    )
+
+    res = engine.run(wf)
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["mapper"].output_payload == []
+
+
+def test_mapped_step_missing_and_non_iterable_collection() -> None:
+    """Validate mapped step suspends workflow when target collection is missing or invalid."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    # Missing target
+    step_missing = StepDefinition(
+        name="missing_map",
+        action=lambda item: item,
+        is_mapped=True,
+        map_over="nonexistent",
+    )
+    wf_missing = WorkflowDefinition(
+        name="missing_wf",
+        stages=(StageDefinition(name="stage_1", steps=(step_missing,)),),
+    )
+
+    res_missing = engine.run(wf_missing)
+    assert res_missing.status == WorkflowStatus.SUSPENDED
+    assert "not found" in (res_missing.error_summary or "")
+
+    # Non-iterable target
+    step_int = StepDefinition(name="source", action=lambda ctx: 12345)
+    step_invalid = StepDefinition(
+        name="invalid_map",
+        action=lambda item: item,
+        depends_on=("source",),
+        is_mapped=True,
+        map_over="source",
+    )
+    wf_invalid = WorkflowDefinition(
+        name="invalid_wf",
+        stages=(
+            StageDefinition(name="stage_1", steps=(step_int,)),
+            StageDefinition(name="stage_2", steps=(step_invalid,)),
+        ),
+    )
+
+    res_invalid = engine.run(wf_invalid)
+    assert res_invalid.status == WorkflowStatus.SUSPENDED
+    assert "not iterable" in (res_invalid.error_summary or "")
+
+
+def test_mapped_step_retry_and_resumption() -> None:
+    """Validate sub-step retry policy and resumption skipping completed sub-steps."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    attempts = {"item_1": 0, "item_2": 0}
+
+    def _flaky_worker(item: str) -> str:
+        attempts[item] += 1
+        if item == "item_2" and attempts[item] == 1:
+            raise ValueError("Transient glitch on item_2")
+        return f"{item}_processed"
+
+    policy = RetryPolicy(
+        max_attempts=3, backoff_type=BackoffType.CONSTANT, initial_delay_seconds=0.01
+    )
+
+    step_1 = StepDefinition(name="source", action=lambda ctx: ["item_1", "item_2"])
+    step_map = StepDefinition(
+        name="processor",
+        action=_flaky_worker,
+        depends_on=("source",),
+        is_mapped=True,
+        map_over="source",
+        retry_policy=policy,
+    )
+
+    wf = WorkflowDefinition(
+        name="retry_map_wf",
+        stages=(
+            StageDefinition(name="stage_1", steps=(step_1,)),
+            StageDefinition(name="stage_2", steps=(step_map,)),
+        ),
+    )
+
+    res = engine.run(wf)
+    assert res.status == WorkflowStatus.COMPLETED
+    assert attempts["item_2"] == 2
+    assert res.step_checkpoints["processor"].output_payload == [
+        "item_1_processed",
+        "item_2_processed",
+    ]
+
+
+def test_mapped_step_suspension_and_resumption() -> None:
+    """Validate mapped step suspends on permanent sub-step failure and skips completed items on resume."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    execution_counts = {"item_1": 0, "item_2": 0}
+    should_fail_item_2 = True
+
+    def _worker(item: str) -> str:
+        nonlocal should_fail_item_2
+        execution_counts[item] += 1
+        if item == "item_2" and should_fail_item_2:
+            raise RuntimeError("Permanent error on item_2")
+        return f"{item}_ok"
+
+    step_1 = StepDefinition(name="source", action=lambda ctx: ["item_1", "item_2"])
+    step_map = StepDefinition(
+        name="processor",
+        action=_worker,
+        depends_on=("source",),
+        is_mapped=True,
+        map_over="source",
+    )
+
+    wf = WorkflowDefinition(
+        name="resume_map_wf",
+        stages=(
+            StageDefinition(name="stage_1", steps=(step_1,)),
+            StageDefinition(name="stage_2", steps=(step_map,)),
+        ),
+    )
+
+    # First run fails and suspends
+    res_1 = engine.run(wf)
+    assert res_1.status == WorkflowStatus.SUSPENDED
+    assert "item_2" in (res_1.error_summary or "")
+    run_id = res_1.run_id
+
+    # Verify item_1 completed and checkpoint was persisted
+    chk_1 = store.get_checkpoint(run_id, "processor[0]")
+    assert chk_1 is not None
+    assert chk_1.status == StepStatus.COMPLETED
+    assert execution_counts["item_1"] == 1
+
+    # Fix error and resume
+    should_fail_item_2 = False
+    res_2 = engine.resume(run_id, wf)
+    assert res_2.status == WorkflowStatus.COMPLETED
+    # item_1 was skipped on resume and was NOT executed again
+    assert execution_counts["item_1"] == 1
+    # item_2 was executed on resume
+    assert execution_counts["item_2"] == 2
+    assert res_2.step_checkpoints["processor"].output_payload == ["item_1_ok", "item_2_ok"]
+
+
+def test_mapped_step_signature_binding_variants() -> None:
+    """Validate argument binding across various callable signatures."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_src = StepDefinition(name="src", action=lambda ctx: [10, 20])
+
+    # Variant 1: (item, ctx)
+    step_v1 = StepDefinition(
+        name="v1",
+        action=lambda item, ctx: f"{item}@{ctx.stage_name}",
+        depends_on=("src",),
+        is_mapped=True,
+        map_over="src",
+    )
+
+    # Variant 2: (ctx, item)
+    step_v2 = StepDefinition(
+        name="v2",
+        action=lambda ctx, item: f"{ctx.step_name}:{item}",
+        depends_on=("src",),
+        is_mapped=True,
+        map_over="src",
+    )
+
+    # Variant 3: (ctx) only
+    step_v3 = StepDefinition(
+        name="v3",
+        action=lambda ctx: ctx.inputs["item"] + 1,
+        depends_on=("src",),
+        is_mapped=True,
+        map_over="src",
+    )
+
+    # Variant 4: () no args
+    step_v4 = StepDefinition(
+        name="v4",
+        action=lambda: "fixed",
+        depends_on=("src",),
+        is_mapped=True,
+        map_over="src",
+    )
+
+    # Variant 5: (item, other_param)
+    step_v5 = StepDefinition(
+        name="v5",
+        action=lambda item, custom_val: f"{item}_{custom_val}",
+        depends_on=("src",),
+        is_mapped=True,
+        map_over="src",
+    )
+
+    wf = WorkflowDefinition(
+        name="variants_wf",
+        stages=(
+            StageDefinition(
+                name="stage_all",
+                steps=(step_src, step_v1, step_v2, step_v3, step_v4, step_v5),
+            ),
+        ),
+    )
+
+    res = engine.run(wf, initial_inputs={"custom_val": "hello"})
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["v1"].output_payload == ["10@stage_all", "20@stage_all"]
+    assert res.step_checkpoints["v2"].output_payload == ["v2[0]:10", "v2[1]:20"]
+    assert res.step_checkpoints["v3"].output_payload == [11, 21]
+    assert res.step_checkpoints["v4"].output_payload == ["fixed", "fixed"]
+    assert res.step_checkpoints["v5"].output_payload == ["10_hello", "20_hello"]
+
+
+async def test_mapped_step_timeout_suspends() -> None:
+    """Validate mapped sub-step timeout triggers suspension."""
+    import asyncio
+
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    async def _sleepy_worker(item: int) -> int:
+        await asyncio.sleep(0.5)
+        return item
+
+    step_1 = StepDefinition(name="src", action=lambda ctx: [1, 2])
+    step_map = StepDefinition(
+        name="slow_task",
+        action=_sleepy_worker,
+        depends_on=("src",),
+        is_mapped=True,
+        map_over="src",
+        timeout_seconds=0.01,
+    )
+
+    wf = WorkflowDefinition(
+        name="timeout_wf",
+        stages=(
+            StageDefinition(name="stage_1", steps=(step_1,)),
+            StageDefinition(name="stage_2", steps=(step_map,)),
+        ),
+    )
+
+    res = await engine.run_async(wf)
+    assert res.status == WorkflowStatus.SUSPENDED
+    assert "TimeoutError" in (res.error_summary or "")

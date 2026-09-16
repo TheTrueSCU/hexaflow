@@ -378,8 +378,15 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         for dep in step.depends_on:
             step_inputs[dep] = cached_outputs.get(dep)
 
+        # 4.5. Dynamic Step Mapping Fan-out
+        if step.is_mapped:
+            return await self._execute_mapped_step(
+                state, stage, step, cached_outputs, initial_inputs, step_inputs
+            )
+
         # 5. Execution & Transient Retry Loop
         attempt = 1
+
         policy = step.retry_policy
         start_time = datetime.now(UTC)
 
@@ -469,6 +476,271 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         if inspect.iscoroutinefunction(action):
             return await action(*args, **kwargs)
         return action(*args, **kwargs)
+
+    async def _execute_mapped_step(
+        self,
+        state: WorkflowExecutionState,
+        stage: StageDefinition,
+        step: StepDefinition,
+        cached_outputs: dict[str, Any],
+        initial_inputs: dict[str, Any],
+        step_inputs: dict[str, Any],
+    ) -> list[Any]:
+        """Execute a dynamically mapped step fanning out across a runtime iterable.
+
+        Args:
+            state: Active mutable workflow execution state.
+            stage: StageDefinition containing the step.
+            step: StepDefinition marked with is_mapped=True.
+            cached_outputs: Current map of evaluated step outputs.
+            initial_inputs: Root inputs passed to workflow execution.
+            step_inputs: Resolved inputs for this step including upstream dependencies.
+
+        Returns:
+            Ordered list of outputs from all executed mapped sub-steps.
+
+        Raises:
+            WorkflowSuspended: If the collection cannot be resolved or is not iterable.
+
+        Notes/Architectural Intent:
+            Evaluates the collection at runtime without upfront DAG size constraints.
+            Persists individual sub-step checkpoints and skips already-completed sub-steps
+            during resumption.
+        """
+        map_key = step.map_over or ""
+        collection = step_inputs.get(map_key)
+        if collection is None and map_key in initial_inputs:
+            collection = initial_inputs[map_key]
+        if collection is None and map_key in cached_outputs:
+            collection = cached_outputs[map_key]
+
+        if collection is None:
+            raise WorkflowSuspended(
+                run_id=state.run_id,
+                failed_step=step.name,
+                reason=f"Mapped step '{step.name}' target '{map_key}' not found in inputs or parent outputs.",
+            )
+
+        if not hasattr(collection, "__iter__"):
+            raise WorkflowSuspended(
+                run_id=state.run_id,
+                failed_step=step.name,
+                reason=f"Mapped step '{step.name}' target '{map_key}' is not iterable (got {type(collection).__name__}).",
+            )
+
+        items = list(collection.values() if isinstance(collection, dict) else collection)
+        start_time = datetime.now(UTC)
+
+        if not items:
+            chk = CheckpointRecord(
+                run_id=state.run_id,
+                stage_name=stage.name,
+                step_name=step.name,
+                status=StepStatus.COMPLETED,
+                attempt_number=1,
+                input_payload=step_inputs,
+                output_payload=[],
+                started_at=start_time,
+                completed_at=start_time,
+                duration_seconds=0.0,
+            )
+            self._store.save_checkpoint(chk)
+            state.step_checkpoints[step.name] = chk
+            return []
+
+        sem = (
+            asyncio.Semaphore(step.concurrency_limit)
+            if step.concurrency_limit and step.concurrency_limit > 0
+            else None
+        )
+
+        async def _run_item(idx: int, item_val: Any) -> Any:
+            if sem:
+                async with sem:
+                    return await self._execute_mapped_sub_step(
+                        state, stage, step, step_inputs, idx, item_val
+                    )
+            return await self._execute_mapped_sub_step(
+                state, stage, step, step_inputs, idx, item_val
+            )
+
+        tasks = [_run_item(i, val) for i, val in enumerate(items)]
+        results = await asyncio.gather(*tasks)
+
+        end_time = datetime.now(UTC)
+        chk = CheckpointRecord(
+            run_id=state.run_id,
+            stage_name=stage.name,
+            step_name=step.name,
+            status=StepStatus.COMPLETED,
+            attempt_number=1,
+            input_payload=step_inputs,
+            output_payload=list(results),
+            started_at=start_time,
+            completed_at=end_time,
+            duration_seconds=(end_time - start_time).total_seconds(),
+        )
+        self._store.save_checkpoint(chk)
+        state.step_checkpoints[step.name] = chk
+        return list(results)
+
+    async def _execute_mapped_sub_step(
+        self,
+        state: WorkflowExecutionState,
+        stage: StageDefinition,
+        step: StepDefinition,
+        step_inputs: dict[str, Any],
+        idx: int,
+        item: Any,
+    ) -> Any:
+        """Execute an individual sub-step of a mapped fan-out with retries and checkpoints.
+
+        Args:
+            state: Active workflow execution state.
+            stage: StageDefinition milestone.
+            step: Parent StepDefinition metadata.
+            step_inputs: Shared inputs dictionary.
+            idx: Index of this item in the mapped collection.
+            item: The runtime value being processed.
+
+        Returns:
+            The output of the sub-step execution.
+
+        Raises:
+            WorkflowSuspended: If the sub-step fails permanently.
+
+        Notes/Architectural Intent:
+            Maintains per-item checkpoint isolation, allowing granular retry policies
+            and partial resumption of failed items without repeating successful items.
+        """
+        sub_step_name = f"{step.name}[{idx}]"
+
+        existing_chk = self._store.get_checkpoint(state.run_id, sub_step_name)
+        if existing_chk and existing_chk.status in (StepStatus.COMPLETED, StepStatus.SKIPPED):
+            return existing_chk.output_payload
+
+        sub_inputs = dict(step_inputs)
+        sub_inputs["item"] = item
+        sub_inputs["index"] = idx
+
+        attempt = 1
+        policy = step.retry_policy
+        start_time = datetime.now(UTC)
+
+        while True:
+            ctx = StepContext(
+                run_id=state.run_id,
+                stage_name=stage.name,
+                step_name=sub_step_name,
+                attempt_number=attempt,
+                inputs=sub_inputs,
+            )
+
+            try:
+                if step.timeout_seconds:
+                    res = await asyncio.wait_for(
+                        self._invoke_mapped_callable(step.action, item, ctx),
+                        timeout=step.timeout_seconds,
+                    )
+                else:
+                    res = await self._invoke_mapped_callable(step.action, item, ctx)
+
+                end_time = datetime.now(UTC)
+                chk = CheckpointRecord(
+                    run_id=state.run_id,
+                    stage_name=stage.name,
+                    step_name=sub_step_name,
+                    status=StepStatus.COMPLETED,
+                    attempt_number=attempt,
+                    input_payload={"item": item, "index": idx},
+                    output_payload=res,
+                    started_at=start_time,
+                    completed_at=end_time,
+                    duration_seconds=(end_time - start_time).total_seconds(),
+                )
+                self._store.save_checkpoint(chk)
+                state.step_checkpoints[sub_step_name] = chk
+                return res
+
+            except Exception as exc:
+                if policy and policy.should_retry(attempt, exc):
+                    delay = policy.calculate_delay(attempt)
+                    await asyncio.sleep(delay)
+                    attempt += 1
+                    continue
+
+                end_time = datetime.now(UTC)
+                tb_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+                chk = CheckpointRecord(
+                    run_id=state.run_id,
+                    stage_name=stage.name,
+                    step_name=sub_step_name,
+                    status=StepStatus.FAILED,
+                    attempt_number=attempt,
+                    input_payload={"item": item, "index": idx},
+                    error_traceback=tb_str,
+                    started_at=start_time,
+                    completed_at=end_time,
+                    duration_seconds=(end_time - start_time).total_seconds(),
+                )
+                self._store.save_checkpoint(chk)
+                state.step_checkpoints[sub_step_name] = chk
+                raise WorkflowSuspended(
+                    run_id=state.run_id,
+                    failed_step=sub_step_name,
+                    reason=f"{type(exc).__name__}: {exc}",
+                ) from exc
+
+    async def _invoke_mapped_callable(self, action: Any, item: Any, ctx: StepContext) -> Any:
+        """Invoke a mapped action callable matching its signature dynamically.
+
+        Args:
+            action: Forward callable or coroutine.
+            item: Current mapped value.
+            ctx: StepContext for this sub-step.
+
+        Returns:
+            Result returned by the action callable.
+
+        Notes/Architectural Intent:
+            Introspects callable parameter names and annotations to bind item, ctx,
+            or keyword arguments cleanly without forcing rigid user signatures.
+        """
+        args, kwargs = _bind_mapped_args(action, item, ctx)
+        if inspect.iscoroutinefunction(action):
+            return await action(*args, **kwargs)
+        return action(*args, **kwargs)
+
+
+def _bind_mapped_args(
+    action: Any, item: Any, ctx: StepContext
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Bind arguments for mapped step invocation matching callable signature."""
+    sig = inspect.signature(action)
+    params = list(sig.parameters.values())
+    if not params:
+        return (), {}
+
+    first = params[0]
+    if first.annotation == StepContext or first.name in ("ctx", "context"):
+        if len(params) > 1:
+            return (ctx, item), {}
+        return (ctx,), {}
+
+    if len(params) == 1:
+        return (item,), {}
+
+    second = params[1]
+    if second.annotation == StepContext or second.name in ("ctx", "context"):
+        return (item, ctx), {}
+
+    kwargs: dict[str, Any] = {}
+    for p in params[1:]:
+        if p.annotation == StepContext or p.name in ("ctx", "context"):
+            kwargs[p.name] = ctx
+        elif p.name in ctx.inputs:
+            kwargs[p.name] = ctx.inputs[p.name]
+    return (item,), kwargs
 
 
 __all__ = [

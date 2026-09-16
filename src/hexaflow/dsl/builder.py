@@ -40,6 +40,9 @@ class _StepBuilder:
         compensation: Any | None = None,
         timeout_seconds: float | None = None,
         is_split: bool = False,
+        is_mapped: bool = False,
+        map_over: str | None = None,
+        concurrency_limit: int | None = None,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -48,10 +51,13 @@ class _StepBuilder:
         self.action = action
         self.depends_on = depends_on
         self.trigger_rule = trigger_rule
-        self.retry_policy = retry_policy
+        self.retry_policy = retry_policy or retries
         self.compensation = compensation
         self.timeout_seconds = timeout_seconds
         self.is_split = is_split
+        self.is_mapped = is_mapped
+        self.map_over = map_over
+        self.concurrency_limit = concurrency_limit
         self.description = description
         self.metadata = metadata or {}
 
@@ -66,6 +72,9 @@ class _StepBuilder:
             retry_policy=self.retry_policy,
             timeout_seconds=self.timeout_seconds,
             is_split=self.is_split,
+            is_mapped=self.is_mapped,
+            map_over=self.map_over,
+            concurrency_limit=self.concurrency_limit,
             description=self.description,
             metadata=self.metadata,
         )
@@ -211,6 +220,74 @@ class Workflow:
 
         return decorator
 
+    def map_step(
+        self,
+        name: str,
+        over: str,
+        stage: str | None = None,
+        depends_on: tuple[str, ...] | list[str] = (),
+        concurrency_limit: int | None = None,
+        trigger_rule: TriggerRule = TriggerRule.ALL_SUCCESS,
+        retry_policy: RetryPolicy | None = None,
+        retries: RetryPolicy | None = None,
+        compensation: Any | None = None,
+        timeout_seconds: float | None = None,
+        description: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Decorator to register a dynamically mapped step that fans out over an iterable.
+
+        Args:
+            name: Unique identifier for this step.
+            over: Name of upstream step or context input key providing the iterable collection.
+            stage: Enclosing stage name (defaults to current active stage or 'default').
+            depends_on: Prerequisite step names for join barriers.
+            concurrency_limit: Optional maximum concurrent instances during mapped fan-out.
+            trigger_rule: Trigger rule evaluated against direct upstream dependencies.
+            retry_policy: Optional transient retry policy evaluated per mapped item.
+            retries: Alias for retry_policy.
+            compensation: Optional rollback callable.
+            timeout_seconds: Maximum execution time per mapped item.
+            description: Optional documentation of the step's operation.
+            metadata: Arbitrary step metadata.
+
+        Returns:
+            Decorator wrapping the target callable.
+
+        Notes/Architectural Intent:
+            Enables dynamic fan-out workflows where collection sizes are resolved at
+            runtime rather than DAG declaration time. Automatically infers dependency
+            on 'over' if it matches an existing step.
+        """
+        target_stage = stage or self._current_stage or "default"
+        if target_stage not in self._stages:
+            self.stage(target_stage)
+
+        deps = tuple(depends_on)
+        active_policy = retry_policy or retries
+
+        def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+            builder = _StepBuilder(
+                name=name,
+                stage_name=target_stage,
+                action=fn,
+                depends_on=deps,
+                trigger_rule=trigger_rule,
+                retry_policy=active_policy,
+                compensation=compensation,
+                timeout_seconds=timeout_seconds,
+                is_split=False,
+                is_mapped=True,
+                map_over=over,
+                concurrency_limit=concurrency_limit,
+                description=description,
+                metadata=metadata,
+            )
+            self._steps.append(builder)
+            return fn
+
+        return decorator
+
     def to_definition(self) -> WorkflowDefinition:
         """Compile declared stages and steps into an immutable, validated WorkflowDefinition.
 
@@ -222,6 +299,16 @@ class Workflow:
             InvalidWorkflowDAGError: If circular dependencies are detected.
             StepNotFoundError: If a dependency is missing.
         """
+        all_declared_step_names = {s.name for s in self._steps}
+        for step_b in self._steps:
+            if (
+                step_b.is_mapped
+                and step_b.map_over
+                and step_b.map_over in all_declared_step_names
+                and step_b.map_over not in step_b.depends_on
+            ):
+                step_b.depends_on = (*step_b.depends_on, step_b.map_over)
+
         stage_definitions: list[StageDefinition] = []
 
         for stage_name, stage_meta in self._stages.items():
@@ -243,6 +330,25 @@ class Workflow:
             version=self.version,
             description=self.description,
         )
+
+    def to_mermaid(self, direction: str = "TD") -> str:
+        """Render the workflow DAG as a Mermaid flowchart definition.
+
+        Args:
+            direction: Flowchart orientation ('TD', 'LR', 'BT', 'RL'). Defaults to 'TD'.
+
+        Returns:
+            Mermaid flowchart markdown string.
+        """
+        return self.to_definition().to_mermaid(direction=direction)
+
+    def to_ascii(self) -> str:
+        """Render the workflow DAG as a formatted ASCII/Unicode hierarchical tree.
+
+        Returns:
+            Formatted multiline string illustrating stages, steps, dependencies, and mapping.
+        """
+        return self.to_definition().to_ascii()
 
     def run(
         self,

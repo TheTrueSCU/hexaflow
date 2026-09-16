@@ -136,3 +136,45 @@ def test_dsl_create_cli_binder() -> None:
     spec = binder.get_spec("lint")
     assert spec is not None
     assert "--skip-l" in spec.cli_flags
+
+
+def test_dsl_map_step_and_dependency_inference() -> None:
+    """Validate @wf.map_step decorator and automatic upstream dependency inference."""
+    store = InMemoryStateStore()
+    wf = Workflow("mapped_pipeline", state_store=store)
+
+    @wf.step("generate_numbers")
+    def gen():
+        return [1, 2, 3, 4]
+
+    @wf.map_step("square", over="generate_numbers", concurrency_limit=2)
+    def sq(item: int) -> int:
+        return item * item
+
+    definition = wf.to_definition()
+    step_defn = definition.get_step("square")
+    assert step_defn.is_mapped is True
+    assert step_defn.map_over == "generate_numbers"
+    assert step_defn.concurrency_limit == 2
+    assert "generate_numbers" in step_defn.depends_on
+
+    res = wf.run()
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["square"].output_payload == [1, 4, 9, 16]
+
+
+def test_dsl_to_mermaid_and_to_ascii_delegation() -> None:
+    """Validate Workflow to_mermaid and to_ascii delegate to definition."""
+    wf = Workflow("diagram_wf")
+
+    @wf.step("init")
+    def _init():
+        return "ok"
+
+    mermaid_str = wf.to_mermaid()
+    assert mermaid_str.startswith("graph TD")
+    assert "init" in mermaid_str
+
+    ascii_str = wf.to_ascii()
+    assert "Workflow: diagram_wf" in ascii_str
+    assert "init" in ascii_str
