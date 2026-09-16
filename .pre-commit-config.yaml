@@ -31,10 +31,7 @@ repos:
     hooks:
       - id: validate-pyproject
 
-  - repo: local
+  - repo: https://github.com/TheTrueSCU/hexaqual
+    rev: 506ebff
     hooks:
       - id: hexaqual-sanity
-        name: hexaqual sanity check
-        entry: uv run hexaqual sanity --skip-tests
-        language: system
-        pass_filenames: false
