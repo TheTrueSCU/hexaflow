@@ -36,7 +36,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "hexaqual[all]>=0.3.0",
+    "hexaqual[all]>=0.4.2",
     "hypothesis>=6.168.0",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
