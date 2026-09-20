@@ -40,3 +40,8 @@ htmlcov/
 
 # Documentation
 site/
+
+# Hexaqual managed agent assets (materialized via hexaqual agents sync)
+.agents/rules/hexaqual-*
+.agents/workflows/hexaqual-*
+.agents/skills/hexaqual_*
