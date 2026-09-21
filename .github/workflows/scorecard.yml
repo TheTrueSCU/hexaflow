@@ -1,0 +1,56 @@
+name: OpenSSF Scorecard
+
+on:
+  # Run when the CI workflow completes successfully on main
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  # Run on PRs so contributors can see impact of their changes
+  pull_request:
+    branches: [main]
+  # Weekly scheduled run catches upstream scoring changes
+  schedule:
+    - cron: "30 4 * * 1"  # 04:30 UTC every Monday
+  workflow_dispatch:
+
+# Scorecard needs read access to the repo and write access to the Security tab
+permissions: read-all
+
+jobs:
+  scorecard:
+    name: OpenSSF Scorecard Analysis
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Do not block or fail CI if Scorecard encountered a transient API or permission error
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      # Required to upload SARIF results to the GitHub Security tab
+      security-events: write
+      # Required for the scorecard action to read the repo
+      contents: read
+      # Required for private repos; harmless on public repos
+      actions: read
+      id-token: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          # Token with Administration:Read-only to evaluate branch protection
+          repo_token: ${{ secrets.SCORECARD_TOKEN || secrets.GITHUB_TOKEN }}
+          # Publish results to the public Scorecard API so the badge works.
+          # Set to 'false' for private repos until you're ready to go public.
+          publish_results: true
+
+      - name: Upload SARIF results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          sarif_file: scorecard-results.sarif
+          category: openssf-scorecard
