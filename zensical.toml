@@ -10,7 +10,8 @@ nav = [
     { "API & DSL Reference" = "api-reference.md" },
     { "Tutorials" = [
         { "Order Fulfillment Pipeline" = "tutorials/01-order-fulfillment-pipeline.md" }
-    ]}
+    ]},
+    { "Ecosystem Architecture" = "ecosystem.md" }
 ]
 
 [project.markdown_extensions]
