@@ -9,15 +9,19 @@
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
+[![Powers Hexastack](https://img.shields.io/badge/powers-hexastack-blueviolet.svg)](https://dopplereffect.us/hexastack/)
+[![Powers Hexaqueue](https://img.shields.io/badge/powers-hexaqueue-blue.svg)](https://dopplereffect.us/hexaqueue/)
+[![Powers Hexaqual](https://img.shields.io/badge/powers-hexaqual-10b981.svg)](https://dopplereffect.us/hexaqual/)
+[![Governed by Hexaqual](https://img.shields.io/badge/governed%20by-hexaqual-10b981.svg)](https://dopplereffect.us/hexaqual/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type checker: ty](https://img.shields.io/badge/type%20checker-ty-blueviolet.svg)](https://github.com/astral-sh/ty)
-[![Governed by Hexaqual](https://img.shields.io/badge/governed%20by-hexaqual-10b981.svg)](https://dopplereffect.us/hexaqual/)
 
 [![OpenSSF Scorecard](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.scorecard.dev%2Fprojects%2Fgithub.com%2FTheTrueSCU%2Fhexaflow&query=%24.score&label=OpenSSF%20Scorecard&color=blue)](https://securityscorecards.dev/viewer/?uri=github.com/TheTrueSCU/hexaflow)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14748/badge)](https://www.bestpractices.dev/projects/14748)
 [![OpenSSF Best Practices: Progress](https://img.shields.io/cii/percentage/14748?label=OpenSSF%20Best%20Practices%3A%20Progress)](https://www.bestpractices.dev/projects/14748)
 
-> 🏛️ **Foundational DAG engine powering [Hexastack](https://dopplereffect.us/hexastack/), [Hexaqueue](https://dopplereffect.us/hexaqueue/), and [Hexaqual](https://dopplereffect.us/hexaqual/)** · 🛡️ **Governed by [Hexaqual](https://dopplereffect.us/hexaqual/)**
+> 🌊 **Foundational DAG engine powering [Hexastack](https://dopplereffect.us/hexastack/), [Hexaqueue](https://dopplereffect.us/hexaqueue/), and [Hexaqual](https://dopplereffect.us/hexaqual/)** · 🛡️ **Governed by [Hexaqual](https://dopplereffect.us/hexaqual/)**
+
 
 ---
 
