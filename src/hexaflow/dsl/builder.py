@@ -13,6 +13,7 @@ from typing import Any
 from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
 from hexaflow.adapters.storage.sqlite import SqliteStateStore
 from hexaflow.domain.models import (
+    ExecutionPool,
     StageDefinition,
     StageExecutionMode,
     StepDefinition,
@@ -43,6 +44,7 @@ class _StepBuilder:
         is_mapped: bool = False,
         map_over: str | None = None,
         concurrency_limit: int | None = None,
+        pool: ExecutionPool = ExecutionPool.ASYNC,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -58,6 +60,7 @@ class _StepBuilder:
         self.is_mapped = is_mapped
         self.map_over = map_over
         self.concurrency_limit = concurrency_limit
+        self.pool = pool
         self.description = description
         self.metadata = metadata or {}
 
@@ -75,6 +78,7 @@ class _StepBuilder:
             is_mapped=self.is_mapped,
             map_over=self.map_over,
             concurrency_limit=self.concurrency_limit,
+            pool=self.pool,
             description=self.description,
             metadata=self.metadata,
         )
@@ -120,6 +124,8 @@ class Workflow:
         description: str = "",
         state_store: WorkflowStateStorePort | None = None,
         engine: WorkflowEnginePort | None = None,
+        max_process_workers: int | None = None,
+        max_thread_workers: int | None = None,
     ) -> None:
         """Initialize a new Workflow builder.
 
@@ -129,6 +135,8 @@ class Workflow:
             description: Architectural intent or business summary.
             state_store: Persistence store for checkpoints. Defaults to SqliteStateStore.
             engine: Execution engine. Defaults to AsyncioWorkflowEngine.
+            max_process_workers: Maximum child processes allocated for ExecutionPool.PROCESS.
+            max_thread_workers: Maximum worker threads allocated for ExecutionPool.THREAD.
         """
         self.name = name
         self.version = version
@@ -138,7 +146,11 @@ class Workflow:
         self._current_stage: str | None = None
 
         self._store = state_store or SqliteStateStore()
-        self._engine = engine or AsyncioWorkflowEngine(state_store=self._store)
+        self._engine = engine or AsyncioWorkflowEngine(
+            state_store=self._store,
+            max_process_workers=max_process_workers,
+            max_thread_workers=max_thread_workers,
+        )
 
     def stage(
         self,
@@ -175,6 +187,7 @@ class Workflow:
         compensation: Any | None = None,
         timeout_seconds: float | None = None,
         is_split: bool = False,
+        pool: ExecutionPool = ExecutionPool.ASYNC,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -186,10 +199,13 @@ class Workflow:
             depends_on: Prerequisite step names for join barriers.
             trigger_rule: Trigger rule evaluated against direct upstream dependencies.
             retry_policy: Optional transient retry policy.
+            retries: Alias for retry_policy.
             compensation: Optional rollback callable.
             timeout_seconds: Maximum execution time.
             is_split: True if step output fans out across workers.
+            pool: Execution strategy (ASYNC, THREAD, PROCESS).
             description: Optional documentation of the step's operation.
+            metadata: Arbitrary step metadata.
 
         Returns:
             Decorator wrapping the target callable.
@@ -212,6 +228,7 @@ class Workflow:
                 compensation=compensation,
                 timeout_seconds=timeout_seconds,
                 is_split=is_split,
+                pool=pool,
                 description=description,
                 metadata=metadata,
             )
@@ -227,6 +244,7 @@ class Workflow:
         stage: str | None = None,
         depends_on: tuple[str, ...] | list[str] = (),
         concurrency_limit: int | None = None,
+        pool: ExecutionPool = ExecutionPool.ASYNC,
         trigger_rule: TriggerRule = TriggerRule.ALL_SUCCESS,
         retry_policy: RetryPolicy | None = None,
         retries: RetryPolicy | None = None,
@@ -243,6 +261,7 @@ class Workflow:
             stage: Enclosing stage name (defaults to current active stage or 'default').
             depends_on: Prerequisite step names for join barriers.
             concurrency_limit: Optional maximum concurrent instances during mapped fan-out.
+            pool: Execution strategy (ASYNC, THREAD, PROCESS).
             trigger_rule: Trigger rule evaluated against direct upstream dependencies.
             retry_policy: Optional transient retry policy evaluated per mapped item.
             retries: Alias for retry_policy.
@@ -280,6 +299,7 @@ class Workflow:
                 is_mapped=True,
                 map_over=over,
                 concurrency_limit=concurrency_limit,
+                pool=pool,
                 description=description,
                 metadata=metadata,
             )
@@ -487,6 +507,40 @@ class Workflow:
         from hexaflow.cli.binder import WorkflowCliBinder
 
         return WorkflowCliBinder(self, aliases=aliases)
+
+    def close(self) -> None:
+        """Shut down underlying engine resources and worker pools."""
+        self._engine.close()
+
+    async def aclose(self) -> None:
+        """Asynchronously shut down underlying engine resources and worker pools."""
+        await self._engine.aclose()
+
+    def __enter__(self) -> "Workflow":
+        """Enter context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit context manager, closing engine worker pools."""
+        self.close()
+
+    async def __aenter__(self) -> "Workflow":
+        """Enter async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit async context manager, asynchronously closing engine worker pools."""
+        await self.aclose()
 
 
 __all__ = [

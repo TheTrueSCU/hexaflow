@@ -13,6 +13,7 @@ from hexaflow.domain.exceptions import (
     StepNotFoundError,
 )
 from hexaflow.domain.models import (
+    ExecutionPool,
     StageDefinition,
     StageExecutionMode,
     StepDefinition,
@@ -323,3 +324,36 @@ def test_workflow_to_mermaid_and_ascii() -> None:
     assert "[mapped: fetch_items] transform" in ascii_rep
     assert "concurrency: 3" in ascii_rep
     assert "rule: ONE_SUCCESS" in ascii_rep
+
+
+def test_execution_pool_model_invariants() -> None:
+    """Validate ExecutionPool defaults, explicit pool assignments, and tree rendering.
+
+    Notes/Architectural Intent:
+        Asserts that StepDefinition defaults to ExecutionPool.ASYNC, accepts
+        THREAD and PROCESS strategies, and accurately includes the strategy
+        tag in ASCII hierarchy diagnostics.
+    """
+    step_async = StepDefinition(name="default_pool", action=lambda ctx: None)
+    async_pool = step_async.pool
+    assert async_pool == ExecutionPool.ASYNC
+
+    step_process = StepDefinition(
+        name="cpu_heavy", action=lambda ctx: None, pool=ExecutionPool.PROCESS
+    )
+    process_pool = step_process.pool
+    assert process_pool == ExecutionPool.PROCESS
+
+    step_thread = StepDefinition(
+        name="io_blocking", action=lambda ctx: None, pool=ExecutionPool.THREAD
+    )
+    thread_pool = step_thread.pool
+    assert thread_pool == ExecutionPool.THREAD
+
+    stage = StageDefinition(name="compute_stage", steps=(step_async, step_process, step_thread))
+    wf = WorkflowDefinition(name="pool_wf", stages=(stage,))
+
+    ascii_out = wf.to_ascii()
+    assert "pool: process" in ascii_out
+    assert "pool: thread" in ascii_out
+    assert "pool: async" not in ascii_out

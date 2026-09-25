@@ -5,7 +5,10 @@ Notes/Architectural Intent:
     splits (fan-out), joins (barriers), and checkpointed state resumption.
 """
 
-from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
+from hexaflow.adapters.engines.local_async import (
+    AsyncioWorkflowEngine,
+    LocalAsyncWorkflowEngine,
+)
 from hexaflow.adapters.storage.in_memory import InMemoryStateStore
 from hexaflow.adapters.storage.sqlite import SqliteStateStore
 from hexaflow.cli.binder import CliOptionSpec, WorkflowCliBinder
@@ -20,6 +23,7 @@ from hexaflow.domain.exceptions import (
     WorkflowSuspended,
 )
 from hexaflow.domain.models import (
+    ExecutionPool,
     StageDefinition,
     StageExecutionMode,
     StepDefinition,
@@ -42,7 +46,7 @@ from hexaflow.dsl.builder import Workflow
 from hexaflow.ports.engine import WorkflowEnginePort
 from hexaflow.ports.storage import WorkflowStateStorePort
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 __all__ = [
@@ -54,8 +58,10 @@ __all__ = [
     "CliOptionSpec",
     "DuplicateStepError",
     "evaluate_trigger_rule",
+    "ExecutionPool",
     "InMemoryStateStore",
     "InvalidWorkflowDAGError",
+    "LocalAsyncWorkflowEngine",
     "RetryPolicy",
     "SqliteStateStore",
     "StageDefinition",

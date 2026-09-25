@@ -16,6 +16,7 @@ from hexaflow.domain.exceptions import (
     WorkflowSuspended,
 )
 from hexaflow.domain.models import (
+    ExecutionPool,
     StageDefinition,
     StageExecutionMode,
     StepDefinition,
@@ -38,6 +39,7 @@ __all__ = [
     "CheckpointCorruptError",
     "CheckpointRecord",
     "DuplicateStepError",
+    "ExecutionPool",
     "InvalidWorkflowDAGError",
     "RetryPolicy",
     "StageDefinition",

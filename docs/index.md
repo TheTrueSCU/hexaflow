@@ -69,10 +69,12 @@ from hexaflow import Workflow, RetryPolicy, StageExecutionMode
 
 wf = Workflow(name="checkout_pipeline", version="1.0.0")
 
+
 @wf.stage("cart")
 @wf.step("validate_cart", retries=RetryPolicy(max_attempts=3))
 def validate_cart(ctx) -> dict:
     return {"order_id": "ord_101", "total": 49.99}
+
 
 @wf.stage("processing", execution_mode=StageExecutionMode.CONCURRENT_ALL)
 @wf.step("charge_card", depends_on=["validate_cart"])
@@ -80,15 +82,18 @@ def charge_card(ctx) -> dict:
     order = ctx.inputs["validate_cart"]
     return {"status": "PAID", "auth": "ch_9942"}
 
+
 @wf.stage("processing")
 @wf.step("reserve_inventory", depends_on=["validate_cart"])
 def reserve_inventory(ctx) -> dict:
     return {"status": "RESERVED", "warehouse": "US-WEST-2"}
 
+
 @wf.stage("fulfillment")
 @wf.step("ship_order", depends_on=["charge_card", "reserve_inventory"])
 def ship_order(ctx) -> dict:
     return {"tracking": "TRK-100234"}
+
 
 if __name__ == "__main__":
     result = wf.run()

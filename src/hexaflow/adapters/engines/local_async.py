@@ -8,15 +8,20 @@ Notes/Architectural Intent:
 """
 
 import asyncio
+import concurrent.futures
 import inspect
+import multiprocessing
+import os
 import traceback
 from datetime import UTC, datetime
+from types import TracebackType
 from typing import Any
 from uuid import uuid4
 
 from hexaflow.adapters.storage.in_memory import InMemoryStateStore
 from hexaflow.domain.exceptions import StepNotFoundError, WorkflowAborted, WorkflowSuspended
 from hexaflow.domain.models import (
+    ExecutionPool,
     StageDefinition,
     StageExecutionMode,
     StepDefinition,
@@ -41,15 +46,86 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         Default workflow executor for localhost and embedded environments. Evaluates
         topological frontiers, enforces split/join barriers, and checks state store
         before executing steps to ensure completed steps are skipped during resumption.
+        Supports cooperative ASYNC, multi-threaded THREAD, and multi-process PROCESS
+        execution strategies.
     """
 
-    def __init__(self, state_store: WorkflowStateStorePort | None = None) -> None:
-        """Initialize the engine with an optional state store.
+    def __init__(
+        self,
+        state_store: WorkflowStateStorePort | None = None,
+        max_process_workers: int | None = None,
+        max_thread_workers: int | None = None,
+    ) -> None:
+        """Initialize the engine with an optional state store and worker concurrency bounds.
 
         Args:
             state_store: Persistence store for checkpoints. Defaults to InMemoryStateStore.
+            max_process_workers: Optional maximum worker processes for ExecutionPool.PROCESS.
+            max_thread_workers: Optional maximum worker threads for ExecutionPool.THREAD.
         """
         self._store: WorkflowStateStorePort = state_store or InMemoryStateStore()
+        self._max_process_workers = max_process_workers
+        self._max_thread_workers = max_thread_workers
+        self._process_pool: concurrent.futures.ProcessPoolExecutor | None = None
+        self._thread_pool: concurrent.futures.ThreadPoolExecutor | None = None
+
+    def _get_process_pool(self) -> concurrent.futures.ProcessPoolExecutor:
+        """Get or lazily instantiate the shared process worker pool."""
+        if self._process_pool is None:
+            ctx = multiprocessing.get_context("spawn")
+            self._process_pool = concurrent.futures.ProcessPoolExecutor(
+                max_workers=self._max_process_workers,
+                mp_context=ctx,
+            )
+        return self._process_pool
+
+    def _get_thread_pool(self) -> concurrent.futures.ThreadPoolExecutor:
+        """Get or lazily instantiate the shared thread worker pool."""
+        if self._thread_pool is None:
+            self._thread_pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=self._max_thread_workers
+            )
+        return self._thread_pool
+
+    def close(self) -> None:
+        """Shut down background process and thread worker pools gracefully."""
+        if self._process_pool is not None:
+            self._process_pool.shutdown(wait=True)
+            self._process_pool = None
+        if self._thread_pool is not None:
+            self._thread_pool.shutdown(wait=True)
+            self._thread_pool = None
+
+    async def aclose(self) -> None:
+        """Asynchronously shut down background worker pools without blocking the event loop."""
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self.close)
+
+    def __enter__(self) -> "AsyncioWorkflowEngine":
+        """Enter context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit context manager, shutting down worker pools."""
+        self.close()
+
+    async def __aenter__(self) -> "AsyncioWorkflowEngine":
+        """Enter async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit async context manager, asynchronously shutting down worker pools."""
+        await self.aclose()
 
     def run(
         self,
@@ -402,11 +478,11 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             try:
                 if step.timeout_seconds:
                     res = await asyncio.wait_for(
-                        self._invoke_callable(step.action, ctx),
+                        self._invoke_callable(step.action, ctx, pool=step.pool),
                         timeout=step.timeout_seconds,
                     )
                 else:
-                    res = await self._invoke_callable(step.action, ctx)
+                    res = await self._invoke_callable(step.action, ctx, pool=step.pool)
 
                 end_time = datetime.now(UTC)
                 chk = CheckpointRecord(
@@ -455,24 +531,32 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                     reason=f"{type(exc).__name__}: {exc}",
                 ) from exc
 
-    async def _invoke_callable(self, action: Any, ctx: StepContext) -> Any:
-        """Invoke action callable, dynamically injecting StepContext or keyword arguments."""
-        sig = inspect.signature(action)
-        params = list(sig.parameters.values())
+    async def _invoke_callable(
+        self,
+        action: Any,
+        ctx: StepContext,
+        pool: ExecutionPool = ExecutionPool.ASYNC,
+    ) -> Any:
+        """Invoke action callable according to its execution pool strategy."""
+        if pool == ExecutionPool.PROCESS:
+            loop = asyncio.get_running_loop()
+            ctx_dict = ctx.model_dump()
+            return await loop.run_in_executor(
+                self._get_process_pool(),
+                _process_step_trampoline,
+                action,
+                ctx_dict,
+            )
+        if pool == ExecutionPool.THREAD:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                self._get_thread_pool(),
+                _thread_step_trampoline,
+                action,
+                ctx,
+            )
 
-        if len(params) == 1 and (
-            params[0].annotation == StepContext or params[0].name in ("ctx", "context")
-        ):
-            args = (ctx,)
-            kwargs = {}
-        elif len(params) == 0:
-            args = ()
-            kwargs = {}
-        else:
-            # Match parameters from ctx.inputs
-            args = ()
-            kwargs = {p.name: ctx.inputs[p.name] for p in params if p.name in ctx.inputs}
-
+        args, kwargs = _bind_step_args(action, ctx)
         if inspect.iscoroutinefunction(action):
             return await action(*args, **kwargs)
         return action(*args, **kwargs)
@@ -548,11 +632,13 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             state.step_checkpoints[step.name] = chk
             return []
 
-        sem = (
-            asyncio.Semaphore(step.concurrency_limit)
-            if step.concurrency_limit and step.concurrency_limit > 0
-            else None
-        )
+        limit = step.concurrency_limit
+        if limit is None and step.pool == ExecutionPool.PROCESS:
+            limit = self._max_process_workers or (
+                getattr(os, "process_cpu_count", os.cpu_count)() or 1
+            )
+
+        sem = asyncio.Semaphore(limit) if limit and limit > 0 else None
 
         async def _run_item(idx: int, item_val: Any) -> Any:
             if sem:
@@ -639,11 +725,11 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             try:
                 if step.timeout_seconds:
                     res = await asyncio.wait_for(
-                        self._invoke_mapped_callable(step.action, item, ctx),
+                        self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool),
                         timeout=step.timeout_seconds,
                     )
                 else:
-                    res = await self._invoke_mapped_callable(step.action, item, ctx)
+                    res = await self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool)
 
                 end_time = datetime.now(UTC)
                 chk = CheckpointRecord(
@@ -691,13 +777,20 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                     reason=f"{type(exc).__name__}: {exc}",
                 ) from exc
 
-    async def _invoke_mapped_callable(self, action: Any, item: Any, ctx: StepContext) -> Any:
-        """Invoke a mapped action callable matching its signature dynamically.
+    async def _invoke_mapped_callable(
+        self,
+        action: Any,
+        item: Any,
+        ctx: StepContext,
+        pool: ExecutionPool = ExecutionPool.ASYNC,
+    ) -> Any:
+        """Invoke a mapped action callable matching its signature and execution pool strategy.
 
         Args:
             action: Forward callable or coroutine.
             item: Current mapped value.
             ctx: StepContext for this sub-step.
+            pool: Execution strategy (ASYNC, THREAD, PROCESS).
 
         Returns:
             Result returned by the action callable.
@@ -705,11 +798,83 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         Notes/Architectural Intent:
             Introspects callable parameter names and annotations to bind item, ctx,
             or keyword arguments cleanly without forcing rigid user signatures.
+            Offloads execution to ProcessPoolExecutor or ThreadPoolExecutor when
+            requested by step pool policy.
         """
+        if pool == ExecutionPool.PROCESS:
+            loop = asyncio.get_running_loop()
+            ctx_dict = ctx.model_dump()
+            return await loop.run_in_executor(
+                self._get_process_pool(),
+                _process_mapped_trampoline,
+                action,
+                item,
+                ctx_dict,
+            )
+        if pool == ExecutionPool.THREAD:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                self._get_thread_pool(),
+                _thread_mapped_trampoline,
+                action,
+                item,
+                ctx,
+            )
+
         args, kwargs = _bind_mapped_args(action, item, ctx)
         if inspect.iscoroutinefunction(action):
             return await action(*args, **kwargs)
         return action(*args, **kwargs)
+
+
+def _bind_step_args(action: Any, ctx: StepContext) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Bind arguments for single step invocation matching callable signature."""
+    sig = inspect.signature(action)
+    params = list(sig.parameters.values())
+
+    if len(params) == 1 and (
+        params[0].annotation == StepContext or params[0].name in ("ctx", "context")
+    ):
+        return (ctx,), {}
+    if len(params) == 0:
+        return (), {}
+
+    kwargs = {p.name: ctx.inputs[p.name] for p in params if p.name in ctx.inputs}
+    return (), kwargs
+
+
+def _process_step_trampoline(action: Any, ctx_dict: dict[str, Any]) -> Any:
+    """Invoked in child process worker for single step."""
+    ctx = StepContext.model_validate(ctx_dict)
+    args, kwargs = _bind_step_args(action, ctx)
+    if inspect.iscoroutinefunction(action):
+        return asyncio.run(action(*args, **kwargs))
+    return action(*args, **kwargs)
+
+
+def _thread_step_trampoline(action: Any, ctx: StepContext) -> Any:
+    """Invoked in thread worker for single step."""
+    args, kwargs = _bind_step_args(action, ctx)
+    if inspect.iscoroutinefunction(action):
+        return asyncio.run(action(*args, **kwargs))
+    return action(*args, **kwargs)
+
+
+def _process_mapped_trampoline(action: Any, item: Any, ctx_dict: dict[str, Any]) -> Any:
+    """Invoked in child process worker for mapped sub-step."""
+    ctx = StepContext.model_validate(ctx_dict)
+    args, kwargs = _bind_mapped_args(action, item, ctx)
+    if inspect.iscoroutinefunction(action):
+        return asyncio.run(action(*args, **kwargs))
+    return action(*args, **kwargs)
+
+
+def _thread_mapped_trampoline(action: Any, item: Any, ctx: StepContext) -> Any:
+    """Invoked in thread worker for mapped sub-step."""
+    args, kwargs = _bind_mapped_args(action, item, ctx)
+    if inspect.iscoroutinefunction(action):
+        return asyncio.run(action(*args, **kwargs))
+    return action(*args, **kwargs)
 
 
 def _bind_mapped_args(
@@ -743,6 +908,9 @@ def _bind_mapped_args(
     return (item,), kwargs
 
 
+LocalAsyncWorkflowEngine = AsyncioWorkflowEngine
+
 __all__ = [
     "AsyncioWorkflowEngine",
+    "LocalAsyncWorkflowEngine",
 ]

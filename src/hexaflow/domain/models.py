@@ -91,6 +91,21 @@ class StageExecutionMode(StrEnum):
     CONCURRENT_FAIL_FAST = "CONCURRENT_FAIL_FAST"
 
 
+class ExecutionPool(StrEnum):
+    """Execution strategy determining runtime scheduling and worker isolation.
+
+    Notes/Architectural Intent:
+        Governs how step action callables are scheduled: cooperatively on the
+        asyncio event loop (ASYNC), offloaded to an OS worker thread for blocking
+        I/O (THREAD), or spawned in a separate OS process for CPU-intensive
+        computations and true multi-core parallel fan-out (PROCESS).
+    """
+
+    ASYNC = "async"
+    THREAD = "thread"
+    PROCESS = "process"
+
+
 class StepDefinition(BaseModel):
     """Specification of an individual executable step within a workflow stage.
 
@@ -134,6 +149,10 @@ class StepDefinition(BaseModel):
     concurrency_limit: int | None = Field(
         default=None,
         description="Optional maximum concurrent instances for mapped execution.",
+    )
+    pool: ExecutionPool = Field(
+        default=ExecutionPool.ASYNC,
+        description="Execution strategy determining concurrency and worker isolation.",
     )
     description: str = Field(
         default="", description="Architectural or business description of the step."
@@ -390,6 +409,8 @@ def _format_ascii_step(step: StepDefinition, is_last_step: bool, child_indent: s
         extras.append(f"rule: {step.trigger_rule.value}")
     if step.concurrency_limit is not None:
         extras.append(f"concurrency: {step.concurrency_limit}")
+    if step.pool != ExecutionPool.ASYNC:
+        extras.append(f"pool: {step.pool.value}")
 
     extra_str = f" ({'; '.join(extras)})" if extras else ""
     return f"{child_indent}{step_prefix}{tag} {step.name}{extra_str}"
@@ -414,6 +435,7 @@ def _format_mermaid_step_node(step: StepDefinition) -> str:
 
 __all__ = [
     "evaluate_trigger_rule",
+    "ExecutionPool",
     "StageDefinition",
     "StageExecutionMode",
     "StepDefinition",

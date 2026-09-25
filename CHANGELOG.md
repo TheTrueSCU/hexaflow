@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-25
+
+### Added
+- **Multi-Core Worker Pools & Execution Pools (`ExecutionPool`)**:
+  - `ExecutionPool` enum supporting `ASYNC` (asyncio event loop coroutine), `THREAD` (`ThreadPoolExecutor`), and `PROCESS` (`ProcessPoolExecutor`).
+  - `pool` parameter on `StepDefinition`, `@wf.step(..., pool=...)`, and `@wf.map_step(..., pool=...)` for true multi-core CPU scaling.
+  - Safe cross-process parameter binding and trampoline execution (`mp_context="spawn"`) for CPU-bound step and mapped sub-step execution.
+  - Granular process and thread worker limit tuning via `max_process_workers` and `max_thread_workers` on `AsyncioWorkflowEngine` and `Workflow`.
+  - Resource lifecycle management with `close()`, `aclose()`, sync and async context managers (`with Workflow(...)`, `async with Workflow(...)`).
+  - `LocalAsyncWorkflowEngine` alias for `AsyncioWorkflowEngine`.
+
 ## [0.3.0] - 2026-09-16
 
 ### Added

@@ -38,6 +38,7 @@ wf = Workflow(
     description="E-commerce checkout, payment processing, inventory reservation, and shipping.",
 )
 
+
 # 2. Stage 1: Validation
 @wf.stage("validation", description="Validate cart items and pricing.")
 @wf.step("validate_cart", retries=RetryPolicy(max_attempts=3))
@@ -49,6 +50,7 @@ def validate_cart(ctx) -> dict:
         "items": ["laptop", "docking_station"],
         "total_usd": 1850.00,
     }
+
 
 # 3. Stage 2: Concurrent Processing (Fan-Out)
 @wf.stage(
@@ -66,6 +68,7 @@ def authorize_payment(ctx) -> dict:
         "status": "APPROVED",
     }
 
+
 @wf.stage("processing")
 @wf.step("reserve_inventory", depends_on=["validate_cart"])
 def reserve_inventory(ctx) -> dict:
@@ -76,6 +79,7 @@ def reserve_inventory(ctx) -> dict:
         "reservation_id": "res_wh_88",
         "warehouse": "US-EAST-1",
     }
+
 
 # 4. Stage 3: Fulfillment (Join Barrier)
 @wf.stage("fulfillment", description="Generate shipment label after payment and inventory.")
@@ -93,6 +97,7 @@ def create_shipment_label(ctx) -> dict:
         "tracking_number": "TRK-98127391823",
         "courier": "HexaExpress",
     }
+
 
 if __name__ == "__main__":
     print(f"Executing workflow '{wf.name}'...")

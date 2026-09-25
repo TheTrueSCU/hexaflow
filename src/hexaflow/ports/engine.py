@@ -160,6 +160,24 @@ class WorkflowEnginePort(ABC):
             Terminal WorkflowExecutionState marked CANCELLED.
         """
 
+    @abstractmethod
+    def close(self) -> None:
+        """Shut down engine worker pools and release background resources.
+
+        Notes/Architectural Intent:
+            Provides a synchronous cleanup hook for execution engines that allocate
+            process or thread worker pools.
+        """
+
+    async def aclose(self) -> None:
+        """Asynchronously shut down engine worker pools and release background resources.
+
+        Notes/Architectural Intent:
+            Provides an asynchronous cleanup hook for execution engines. By default,
+            delegates to synchronous close().
+        """
+        self.close()
+
 
 __all__ = [
     "WorkflowEnginePort",

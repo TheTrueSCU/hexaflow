@@ -152,6 +152,7 @@ Declare compensations with `@wf.compensate`:
 def reserve_inventory(ctx):
     return {"res_id": "r_101"}
 
+
 @wf.compensate("reserve_inventory")
 def release_inventory(ctx):
     res_id = ctx.inputs["reserve_inventory"]["res_id"]

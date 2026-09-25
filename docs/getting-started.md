@@ -34,11 +34,13 @@ wf = Workflow(
     description="Fetch, transform, and persist customer records.",
 )
 
+
 # 2. Define sequential steps
 @wf.step("fetch_data", retries=RetryPolicy(max_attempts=3, backoff_seconds=1.0))
 def fetch_data(ctx) -> dict:
     print("Fetching remote customer data...")
     return {"raw_records": 1500, "source": "s3://raw-bucket/customers.json"}
+
 
 @wf.step("clean_records", depends_on=["fetch_data"])
 def clean_records(ctx) -> dict:
@@ -46,11 +48,13 @@ def clean_records(ctx) -> dict:
     print(f"Cleaning {raw['raw_records']} records from {raw['source']}...")
     return {"cleaned_records": 1482, "dropped": 18}
 
+
 @wf.step("persist_output", depends_on=["clean_records"])
 def persist_output(ctx) -> dict:
     cleaned = ctx.inputs["clean_records"]
     print(f"Persisting {cleaned['cleaned_records']} records to warehouse...")
     return {"status": "SUCCESS", "destination": "analytics.customers"}
+
 
 if __name__ == "__main__":
     result = wf.run()
@@ -123,10 +127,12 @@ from hexaflow import Workflow, StageExecutionMode
 
 wf = Workflow(name="parallel_fanout")
 
+
 @wf.stage("setup")
 @wf.step("init_batch")
 def init_batch(ctx) -> dict:
     return {"batch_id": "b_100", "chunks": 3}
+
 
 # Concurrent execution across multiple worker coroutines
 @wf.stage("processing", execution_mode=StageExecutionMode.CONCURRENT_ALL)
@@ -134,10 +140,12 @@ def init_batch(ctx) -> dict:
 def process_chunk_a(ctx) -> dict:
     return {"chunk": "A", "count": 500}
 
+
 @wf.stage("processing")
 @wf.step("process_chunk_b", depends_on=["init_batch"])
 def process_chunk_b(ctx) -> dict:
     return {"chunk": "B", "count": 500}
+
 
 # Synchronization barrier: only runs once both A and B succeed
 @wf.stage("aggregation")

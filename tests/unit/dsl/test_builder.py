@@ -5,8 +5,9 @@ Notes/Architectural Intent:
     validated WorkflowDefinitions and delegate execution to the engine seamlessly.
 """
 
+from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
 from hexaflow.adapters.storage.in_memory import InMemoryStateStore
-from hexaflow.domain.models import StageExecutionMode, TriggerRule
+from hexaflow.domain.models import ExecutionPool, StageExecutionMode, TriggerRule
 from hexaflow.domain.state import StepStatus, WorkflowStatus
 from hexaflow.dsl.builder import Workflow
 
@@ -178,3 +179,53 @@ def test_dsl_to_mermaid_and_to_ascii_delegation() -> None:
     ascii_str = wf.to_ascii()
     assert "Workflow: diagram_wf" in ascii_str
     assert "init" in ascii_str
+
+
+def test_dsl_execution_pool_compilation_and_workers() -> None:
+    """Validate @wf.step and @wf.map_step compile execution pool configurations."""
+    wf = Workflow(
+        "pool_wf",
+        max_process_workers=3,
+        max_thread_workers=6,
+    )
+
+    @wf.step("cpu_task", pool=ExecutionPool.PROCESS)
+    def _cpu(ctx):
+        return "cpu_res"
+
+    @wf.step("io_task", pool=ExecutionPool.THREAD)
+    def _io(ctx):
+        return "io_res"
+
+    @wf.map_step("batch_cpu", over="cpu_task", pool=ExecutionPool.PROCESS)
+    def _map_cpu(item):
+        return item
+
+    defn = wf.to_definition()
+    cpu_step = defn.get_step("cpu_task")
+    assert cpu_step.pool == ExecutionPool.PROCESS
+
+    io_step = defn.get_step("io_task")
+    assert io_step.pool == ExecutionPool.THREAD
+
+    map_step = defn.get_step("batch_cpu")
+    assert map_step.pool == ExecutionPool.PROCESS
+
+    # Verify workers are forwarded to default engine
+    engine = wf._engine
+    assert isinstance(engine, AsyncioWorkflowEngine)
+    p_workers = engine._max_process_workers
+    assert p_workers == 3
+    t_workers = engine._max_thread_workers
+    assert t_workers == 6
+
+
+async def test_dsl_context_managers() -> None:
+    """Validate sync and async context managers gracefully close worker pools."""
+    with Workflow("ctx_sync", max_process_workers=2) as wf_sync:
+        status = wf_sync.name
+        assert status == "ctx_sync"
+
+    async with Workflow("ctx_async", max_thread_workers=2) as wf_async:
+        name = wf_async.name
+        assert name == "ctx_async"

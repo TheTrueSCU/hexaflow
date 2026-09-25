@@ -9,6 +9,7 @@ Notes/Architectural Intent:
 from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
 from hexaflow.adapters.storage.in_memory import InMemoryStateStore
 from hexaflow.domain.models import (
+    ExecutionPool,
     StageDefinition,
     StageExecutionMode,
     StepDefinition,
@@ -624,5 +625,125 @@ async def test_mapped_step_timeout_suspends() -> None:
     )
 
     res = await engine.run_async(wf)
-    assert res.status == WorkflowStatus.SUSPENDED
-    assert "TimeoutError" in (res.error_summary or "")
+    status = res.status
+    assert status == WorkflowStatus.SUSPENDED
+    summary = res.error_summary or ""
+    assert "TimeoutError" in summary
+
+
+def _standalone_process_step(ctx: StepContext) -> str:
+    """Helper for testing step execution in child process.
+
+    Args:
+        ctx: Current step context.
+
+    Returns:
+        Formatted execution string.
+    """
+    return f"processed_{ctx.step_name}"
+
+
+def _standalone_square(item: int) -> int:
+    """Helper for testing mapped step execution in child process.
+
+    Args:
+        item: Input integer.
+
+    Returns:
+        Squared integer.
+    """
+    return item * item
+
+
+def test_step_execution_in_thread_and_process_pools() -> None:
+    """Validate step execution dispatched to ThreadPoolExecutor and ProcessPoolExecutor.
+
+    Notes/Architectural Intent:
+        Guarantees that steps configured with ExecutionPool.THREAD or ExecutionPool.PROCESS
+        execute correctly outside the asyncio event loop and return output payloads.
+    """
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store, max_process_workers=2, max_thread_workers=2)
+
+    step_thread = StepDefinition(
+        name="thread_step",
+        action=lambda ctx: f"threaded_{ctx.step_name}",
+        pool=ExecutionPool.THREAD,
+    )
+    step_process = StepDefinition(
+        name="proc_step",
+        action=_standalone_process_step,
+        pool=ExecutionPool.PROCESS,
+    )
+
+    stage = StageDefinition(
+        name="pool_stage",
+        steps=(step_thread, step_process),
+        execution_mode=StageExecutionMode.CONCURRENT_ALL,
+    )
+    wf = WorkflowDefinition(name="pools_wf", stages=(stage,))
+
+    try:
+        res = engine.run(wf)
+        status = res.status
+        assert status == WorkflowStatus.COMPLETED
+
+        out_thread = res.step_checkpoints["thread_step"].output_payload
+        assert out_thread == "threaded_thread_step"
+
+        out_proc = res.step_checkpoints["proc_step"].output_payload
+        assert out_proc == "processed_proc_step"
+    finally:
+        engine.close()
+
+
+def test_mapped_step_execution_in_process_pool() -> None:
+    """Validate mapped steps scaling across ProcessPoolExecutor workers.
+
+    Notes/Architectural Intent:
+        Ensures parallel fan-out over items using child processes computes and
+        aggregates results cleanly.
+    """
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store, max_process_workers=2)
+
+    step_src = StepDefinition(name="numbers", action=lambda ctx: [2, 4, 6])
+    step_map = StepDefinition(
+        name="squared",
+        action=_standalone_square,
+        depends_on=("numbers",),
+        is_mapped=True,
+        map_over="numbers",
+        pool=ExecutionPool.PROCESS,
+    )
+
+    stage_1 = StageDefinition(name="src_stage", steps=(step_src,))
+    stage_2 = StageDefinition(name="map_stage", steps=(step_map,))
+    wf = WorkflowDefinition(name="mapped_proc_wf", stages=(stage_1, stage_2))
+
+    try:
+        res = engine.run(wf)
+        status = res.status
+        assert status == WorkflowStatus.COMPLETED
+        payload = res.step_checkpoints["squared"].output_payload
+        assert payload == [4, 16, 36]
+    finally:
+        engine.close()
+
+
+async def test_engine_pools_lifecycle_and_context_managers() -> None:
+    """Validate engine context managers and pool lifecycle shutdown.
+
+    Notes/Architectural Intent:
+        Verifies that with/async with blocks properly instantiate and tear down
+        underlying thread and process worker pools without resource leaks.
+    """
+    store = InMemoryStateStore()
+
+    with AsyncioWorkflowEngine(state_store=store, max_process_workers=2) as eng_sync:
+        pool_p = eng_sync._get_process_pool()
+        assert pool_p is not None
+
+    async with AsyncioWorkflowEngine(state_store=store, max_thread_workers=2) as eng_async:
+        pool_t = eng_async._get_thread_pool()
+        assert pool_t is not None
