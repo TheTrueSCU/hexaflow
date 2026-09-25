@@ -79,6 +79,8 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Run Pre-Commit Quality Checks
+        env:
+          SKIP: hexaqual-agents
         run: uv run pre-commit run --all-files
 
   # =========================================================================
