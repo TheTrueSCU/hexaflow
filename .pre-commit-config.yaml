@@ -32,9 +32,8 @@ repos:
       - id: validate-pyproject
 
   - repo: https://github.com/TheTrueSCU/hexaqual
-    rev: v0.6.0
+    rev: v0.7.0
     hooks:
       - id: hexaqual-sanity
       - id: hexaqual-architecture
-      - id: hexaqual-agents       # new
-      - id: hexaqual-diagrams
+      - id: hexaqual-agents
