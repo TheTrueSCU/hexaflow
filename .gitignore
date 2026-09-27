@@ -37,6 +37,8 @@ htmlcov/
 
 # Hexaflow state & artifacts
 .hexaflow/
+gremlins.json
+.gremlins_cache/
 
 # Documentation
 site/
