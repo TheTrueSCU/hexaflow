@@ -747,3 +747,33 @@ async def test_engine_pools_lifecycle_and_context_managers() -> None:
     async with AsyncioWorkflowEngine(state_store=store, max_thread_workers=2) as eng_async:
         pool_t = eng_async._get_thread_pool()
         assert pool_t is not None
+
+
+def test_engine_sentry_step_failure_hook(monkeypatch) -> None:
+    """Verify engine pushes step failure metadata to sentry_sdk when active."""
+    import sys
+    from unittest.mock import MagicMock
+
+    mock_sentry = MagicMock()
+    mock_scope = MagicMock()
+    mock_sentry.push_scope.return_value.__enter__.return_value = mock_scope
+    monkeypatch.setitem(sys.modules, "sentry_sdk", mock_sentry)
+
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    def failing_action(ctx):
+        raise RuntimeError("simulated pipeline error")
+
+    step_fail = StepDefinition(name="failing_step", action=failing_action)
+    stage = StageDefinition(name="fail_stage", steps=(step_fail,))
+    wf = WorkflowDefinition(name="sentry_test_wf", stages=(stage,))
+
+    res = engine.run(wf)
+    status = res.status
+    assert status == WorkflowStatus.SUSPENDED
+
+    mock_scope.set_tag.assert_any_call("workflow_name", "sentry_test_wf")
+    mock_scope.set_tag.assert_any_call("stage_name", "fail_stage")
+    mock_scope.set_tag.assert_any_call("step_name", "failing_step")
+    assert mock_sentry.capture_exception.called

@@ -30,7 +30,13 @@ Homepage = "https://github.com/TheTrueSCU/hexaflow"
 Repository = "https://github.com/TheTrueSCU/hexaflow"
 Documentation = "https://dopplereffect.us/hexaflow/"
 
+[project.optional-dependencies]
+sentry = [
+    "sentry-sdk>=2.0.0",
+]
+
 [build-system]
+
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 

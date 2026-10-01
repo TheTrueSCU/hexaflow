@@ -47,3 +47,8 @@ site/
 .agents/rules/hexaqual-*
 .agents/workflows/hexaqual-*
 .agents/skills/hexaqual_*
+
+# Local environment configuration
+.env
+.env.*
+!.env.example

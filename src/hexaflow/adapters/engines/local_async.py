@@ -39,6 +39,33 @@ from hexaflow.ports.engine import WorkflowEnginePort
 from hexaflow.ports.storage import WorkflowStateStorePort
 
 
+def _capture_sentry_step_exception(
+    exc: Exception,
+    workflow_name: str,
+    stage_name: str,
+    step_name: str,
+    run_id: str,
+    attempt: int,
+    pool: str | None = None,
+) -> None:
+    """Push workflow step failure context to Sentry scope if sentry_sdk is active."""
+    try:
+        import importlib
+
+        sentry_sdk = importlib.import_module("sentry_sdk")
+        with sentry_sdk.push_scope() as scope:
+            scope.set_tag("workflow_name", workflow_name)
+            scope.set_tag("stage_name", stage_name)
+            scope.set_tag("step_name", step_name)
+            scope.set_tag("run_id", run_id)
+            scope.set_extra("attempt_number", attempt)
+            if pool:
+                scope.set_tag("execution_pool", pool)
+            sentry_sdk.capture_exception(exc)
+    except Exception:
+        pass
+
+
 class AsyncioWorkflowEngine(WorkflowEnginePort):
     """Localhost asyncio workflow execution engine supporting splits, joins, and resumption.
 
@@ -525,6 +552,16 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                 )
                 self._store.save_checkpoint(chk)
                 state.step_checkpoints[step.name] = chk
+                _capture_sentry_step_exception(
+                    exc=exc,
+                    workflow_name=state.workflow_name,
+                    stage_name=stage.name,
+                    step_name=step.name,
+                    run_id=state.run_id,
+                    attempt=attempt,
+                    pool=step.pool.value if hasattr(step.pool, "value") else str(step.pool),
+                )
+
                 raise WorkflowSuspended(
                     run_id=state.run_id,
                     failed_step=step.name,
@@ -771,6 +808,16 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                 )
                 self._store.save_checkpoint(chk)
                 state.step_checkpoints[sub_step_name] = chk
+                _capture_sentry_step_exception(
+                    exc=exc,
+                    workflow_name=state.workflow_name,
+                    stage_name=stage.name,
+                    step_name=sub_step_name,
+                    run_id=state.run_id,
+                    attempt=attempt,
+                    pool=step.pool.value if hasattr(step.pool, "value") else str(step.pool),
+                )
+
                 raise WorkflowSuspended(
                     run_id=state.run_id,
                     failed_step=sub_step_name,
