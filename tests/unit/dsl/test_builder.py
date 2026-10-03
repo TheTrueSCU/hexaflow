@@ -5,6 +5,8 @@ Notes/Architectural Intent:
     validated WorkflowDefinitions and delegate execution to the engine seamlessly.
 """
 
+from pathlib import Path
+
 from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
 from hexaflow.adapters.storage.in_memory import InMemoryStateStore
 from hexaflow.domain.models import ExecutionPool, StageExecutionMode, TriggerRule
@@ -229,3 +231,17 @@ async def test_dsl_context_managers() -> None:
     async with Workflow("ctx_async", max_thread_workers=2) as wf_async:
         name = wf_async.name
         assert name == "ctx_async"
+
+
+def test_dsl_bind_store(tmp_path: Path) -> None:
+    """Validate bind_store reconfigures state store on workflow and engine."""
+    from hexaflow.adapters.storage.sqlite import SqliteStateStore
+
+    wf = Workflow("bind_store_wf")
+    new_store = SqliteStateStore(db_path=tmp_path / "bind.db")
+    wf.bind_store(new_store)
+
+    assert wf._store is new_store
+    engine = wf._engine
+    assert isinstance(engine, AsyncioWorkflowEngine)
+    assert engine._store is new_store

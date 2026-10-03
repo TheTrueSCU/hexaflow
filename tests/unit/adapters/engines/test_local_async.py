@@ -786,3 +786,39 @@ def test_engine_sentry_step_failure_hook(monkeypatch) -> None:
     mock_scope.set_tag.assert_any_call("stage_name", "fail_stage")
     mock_scope.set_tag.assert_any_call("step_name", "failing_step")
     assert mock_sentry.capture_exception.called
+
+
+def test_engine_resume_and_abort_missing_run_and_input_merging() -> None:
+    """Validate exceptions when resuming or aborting non-existent runs, and input merging."""
+    from hexaflow.domain.exceptions import WorkflowAborted, WorkflowSuspended
+
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_1 = StepDefinition(name="step_1", action=lambda ctx: ctx.inputs)
+    wf = WorkflowDefinition(
+        name="merge_inputs_wf",
+        stages=(StageDefinition(name="stage_1", steps=(step_1,)),),
+    )
+
+    with pytest.raises(WorkflowSuspended, match="not found in state store"):
+        engine.resume("missing_run_id", wf)
+
+    with pytest.raises(WorkflowAborted, match="not found"):
+        engine.abort("missing_run_id", wf)
+
+    # Initial inputs merged with patch_inputs
+    res = engine.run(wf, initial_inputs={"base": 1, "override": 2})
+    assert res.status == WorkflowStatus.COMPLETED
+
+    # Reset state to SUSPENDED to simulate resumption with patch
+    state = store.get_run(res.run_id)
+    assert state is not None
+    state.status = WorkflowStatus.SUSPENDED
+    store.save_run(state)
+    store.clear_checkpoints(res.run_id)
+
+    resumed = engine.resume(res.run_id, wf, patch_inputs={"override": 99, "new_key": 42})
+    assert resumed.status == WorkflowStatus.COMPLETED
+    output = resumed.step_checkpoints["step_1"].output_payload
+    assert output == {"base": 1, "override": 99, "new_key": 42}

@@ -201,6 +201,7 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             run_id=run_id,
             workflow_name=workflow.name,
             status=WorkflowStatus.RUNNING,
+            initial_inputs=initial_inputs or {},
         )
         self._store.save_run(state)
         skipped = set(skip_steps or ())

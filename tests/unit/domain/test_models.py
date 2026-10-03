@@ -264,6 +264,36 @@ def test_trigger_rules_evaluation() -> None:
     )
 
 
+def test_validate_dependency_schedule_rejects_out_of_order_dependencies() -> None:
+    """Validate that forward dependencies or concurrent dependencies are rejected."""
+    step_1 = StepDefinition(name="step_1", action=lambda ctx: 1, depends_on=("step_2",))
+    step_2 = StepDefinition(name="step_2", action=lambda ctx: 2)
+
+    # 1. Backward dependency within same sequential stage (step_1 declared before step_2)
+    stage_seq = StageDefinition(
+        name="seq_stage",
+        steps=(step_1, step_2),
+        execution_mode=StageExecutionMode.SEQUENTIAL,
+    )
+    with pytest.raises(InvalidWorkflowDAGError, match="not scheduled before it"):
+        WorkflowDefinition(name="bad_seq_wf", stages=(stage_seq,))
+
+    # 2. Dependency within concurrent stage
+    stage_conc = StageDefinition(
+        name="conc_stage",
+        steps=(step_2, step_1),
+        execution_mode=StageExecutionMode.CONCURRENT_ALL,
+    )
+    with pytest.raises(InvalidWorkflowDAGError, match="not scheduled before it"):
+        WorkflowDefinition(name="bad_conc_wf", stages=(stage_conc,))
+
+    # 3. Dependency on a step in a future stage
+    stage_a = StageDefinition(name="stage_a", steps=(step_1,))
+    stage_b = StageDefinition(name="stage_b", steps=(step_2,))
+    with pytest.raises(InvalidWorkflowDAGError, match="not scheduled before it"):
+        WorkflowDefinition(name="bad_future_wf", stages=(stage_a, stage_b))
+
+
 def test_step_definition_mapping_attributes() -> None:
     """Validate StepDefinition mapped step attributes."""
     step = StepDefinition(
