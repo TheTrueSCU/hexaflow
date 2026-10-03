@@ -90,6 +90,17 @@ class InMemoryStateStore(WorkflowStateStorePort):
             run_checkpoints = self._checkpoints.get(run_id, {})
             return [rec.model_copy(deep=True) for rec in run_checkpoints.values()]
 
+    def clear_checkpoints(self, run_id: str) -> None:
+        """Clear all recorded step checkpoints for a workflow run upon restart.
+
+        Args:
+            run_id: Parent workflow execution ID.
+        """
+        with self._lock:
+            self._checkpoints.pop(run_id, None)
+            if run_id in self._runs:
+                self._runs[run_id].step_checkpoints.clear()
+
 
 __all__ = [
     "InMemoryStateStore",

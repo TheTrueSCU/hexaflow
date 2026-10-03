@@ -7,6 +7,7 @@ Notes/Architectural Intent:
 """
 
 import json
+import shutil
 import sqlite3
 import threading
 from collections.abc import Generator
@@ -15,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from hexaflow.domain.exceptions import CheckpointCorruptError
 from hexaflow.domain.state import (
     CheckpointRecord,
     StepStatus,
@@ -92,10 +94,16 @@ class SqliteStateStore(WorkflowStateStorePort):
                     current_stage TEXT,
                     error_summary TEXT,
                     started_at TEXT NOT NULL,
-                    finished_at TEXT
+                    finished_at TEXT,
+                    initial_inputs TEXT
                 );
                 """
             )
+            cursor = conn.execute("PRAGMA table_info(workflow_runs);")
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "initial_inputs" not in columns:
+                conn.execute("ALTER TABLE workflow_runs ADD COLUMN initial_inputs TEXT;")
+
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS step_checkpoints (
@@ -157,6 +165,9 @@ class SqliteStateStore(WorkflowStateStorePort):
 
         Returns:
             Deserialized Python payload object.
+
+        Raises:
+            CheckpointCorruptError: If a referenced spillover artifact file is missing.
         """
         if not raw_str:
             return None
@@ -167,7 +178,7 @@ class SqliteStateStore(WorkflowStateStorePort):
             if spill_path.exists():
                 spill_bytes = spill_path.read_bytes()
                 return json.loads(spill_bytes.decode("utf-8"))
-            return None
+            raise CheckpointCorruptError(f"Spillover payload file missing on disk: {spill_path}")
         return parsed
 
     def save_run(self, state: WorkflowExecutionState) -> None:
@@ -180,13 +191,14 @@ class SqliteStateStore(WorkflowStateStorePort):
             conn.execute(
                 """
                 INSERT INTO workflow_runs (
-                    run_id, workflow_name, status, current_stage, error_summary, started_at, finished_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    run_id, workflow_name, status, current_stage, error_summary, started_at, finished_at, initial_inputs
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(run_id) DO UPDATE SET
                     status=excluded.status,
                     current_stage=excluded.current_stage,
                     error_summary=excluded.error_summary,
-                    finished_at=excluded.finished_at;
+                    finished_at=excluded.finished_at,
+                    initial_inputs=COALESCE(excluded.initial_inputs, workflow_runs.initial_inputs);
                 """,
                 (
                     state.run_id,
@@ -196,6 +208,9 @@ class SqliteStateStore(WorkflowStateStorePort):
                     state.error_summary,
                     state.started_at.isoformat(),
                     state.finished_at.isoformat() if state.finished_at else None,
+                    json.dumps(state.initial_inputs, cls=_StateJSONEncoder)
+                    if state.initial_inputs is not None
+                    else None,
                 ),
             )
             conn.commit()
@@ -216,6 +231,9 @@ class SqliteStateStore(WorkflowStateStorePort):
 
             checkpoints = self.get_checkpoints(run_id)
             step_map = {chk.step_name: chk for chk in checkpoints}
+            col_names = set(row.keys())
+            initial_inputs_raw = row["initial_inputs"] if "initial_inputs" in col_names else None
+            initial_inputs = json.loads(initial_inputs_raw) if initial_inputs_raw else {}
 
             return WorkflowExecutionState(
                 run_id=row["run_id"],
@@ -224,6 +242,7 @@ class SqliteStateStore(WorkflowStateStorePort):
                 current_stage=row["current_stage"],
                 error_summary=row["error_summary"],
                 step_checkpoints=step_map,
+                initial_inputs=initial_inputs,
                 started_at=datetime.fromisoformat(row["started_at"]),
                 finished_at=datetime.fromisoformat(row["finished_at"])
                 if row["finished_at"]
@@ -321,6 +340,24 @@ class SqliteStateStore(WorkflowStateStorePort):
                 (run_id,),
             ).fetchall()
             return [self._row_to_checkpoint(row) for row in rows]
+
+    def clear_checkpoints(self, run_id: str) -> None:
+        """Clear all recorded step checkpoints and spilled artifacts for a run upon restart.
+
+        Args:
+            run_id: Parent workflow execution ID.
+        """
+        with self._lock:
+            with self._connection() as conn:
+                conn.execute("DELETE FROM step_checkpoints WHERE run_id = ?", (run_id,))
+                conn.commit()
+            safe_run_id = Path(run_id).name
+            run_artifacts = (self._artifacts_dir / safe_run_id).resolve()
+            if (
+                run_artifacts.is_relative_to(self._artifacts_dir.resolve())
+                and run_artifacts.exists()
+            ):
+                shutil.rmtree(run_artifacts, ignore_errors=True)
 
     def _row_to_checkpoint(self, row: sqlite3.Row) -> CheckpointRecord:
         """Convert a database row into a domain CheckpointRecord."""

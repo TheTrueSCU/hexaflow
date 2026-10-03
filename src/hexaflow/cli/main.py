@@ -16,7 +16,6 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
-from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
 from hexaflow.adapters.storage.sqlite import SqliteStateStore
 from hexaflow.domain.state import StepStatus, WorkflowStatus
 from hexaflow.dsl.builder import Workflow
@@ -191,11 +190,11 @@ def run(
     """Execute a workflow definition locally."""
     wf = _load_workflow_from_target(target)
     store = SqliteStateStore(db_path=db_path)
-    wf._store = store
-    wf._engine = AsyncioWorkflowEngine(state_store=store)
+    wf.bind_store(store)
 
     console.print(f"[bold green]Starting workflow:[/] [cyan]{wf.name}[/]")
-    state = wf.run()
+    with wf:
+        state = wf.run()
 
     if state.status == WorkflowStatus.COMPLETED:
         console.print(
@@ -222,11 +221,11 @@ def resume(
     """Resume a suspended workflow from its latest checkpoints without re-running completed steps."""
     wf = _load_workflow_from_target(target)
     store = SqliteStateStore(db_path=db_path)
-    wf._store = store
-    wf._engine = AsyncioWorkflowEngine(state_store=store)
+    wf.bind_store(store)
 
     console.print(f"[bold cyan]Resuming workflow:[/] {wf.name} (Run ID: [cyan]{run_id}[/])")
-    state = wf.resume(run_id)
+    with wf:
+        state = wf.resume(run_id)
 
     if state.status == WorkflowStatus.COMPLETED:
         console.print(
@@ -250,13 +249,13 @@ def restart(
     """Restart a workflow execution run from the beginning."""
     wf = _load_workflow_from_target(target)
     store = SqliteStateStore(db_path=db_path)
-    wf._store = store
-    wf._engine = AsyncioWorkflowEngine(state_store=store)
+    wf.bind_store(store)
 
     console.print(
         f"[bold yellow]Restarting workflow from start:[/] {wf.name} (Run ID: [cyan]{run_id}[/])"
     )
-    state = wf.restart(run_id)
+    with wf:
+        state = wf.restart(run_id)
 
     if state.status == WorkflowStatus.COMPLETED:
         console.print(
@@ -275,11 +274,11 @@ def abort(
     """Abort an active or suspended workflow, unwinding any step compensations."""
     wf = _load_workflow_from_target(target)
     store = SqliteStateStore(db_path=db_path)
-    wf._store = store
-    wf._engine = AsyncioWorkflowEngine(state_store=store)
+    wf.bind_store(store)
 
     console.print(f"[bold magenta]Aborting workflow:[/] {wf.name} (Run ID: [cyan]{run_id}[/])")
-    state = wf.abort(run_id)
+    with wf:
+        state = wf.abort(run_id)
     console.print(f"[bold magenta]Workflow run cancelled.[/] Status: {state.status.value}")
 
 

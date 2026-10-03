@@ -115,7 +115,11 @@ def s1(ctx):
     assert restart_res.exit_code == 0
     assert "Restarting workflow from start" in restart_res.stdout
 
-    # 3. Test hexaflow resume
+    # 3. Test hexaflow resume (set to SUSPENDED to simulate resumption)
+    with store._connection() as conn:
+        conn.execute("UPDATE workflow_runs SET status = 'SUSPENDED' WHERE run_id = ?", (run_id,))
+        conn.commit()
+
     resume_res = runner.invoke(app, ["resume", run_id, target, "--db", str(db_file)])
     assert resume_res.exit_code == 0
     assert "Resuming workflow" in resume_res.stdout

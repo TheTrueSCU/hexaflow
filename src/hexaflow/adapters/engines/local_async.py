@@ -9,7 +9,9 @@ Notes/Architectural Intent:
 
 import asyncio
 import concurrent.futures
+import copy
 import inspect
+import logging
 import multiprocessing
 import os
 import traceback
@@ -19,7 +21,12 @@ from typing import Any
 from uuid import uuid4
 
 from hexaflow.adapters.storage.in_memory import InMemoryStateStore
-from hexaflow.domain.exceptions import StepNotFoundError, WorkflowAborted, WorkflowSuspended
+from hexaflow.domain.exceptions import (
+    StepNotFoundError,
+    WorkflowAborted,
+    WorkflowError,
+    WorkflowSuspended,
+)
 from hexaflow.domain.models import (
     ExecutionPool,
     StageDefinition,
@@ -37,6 +44,8 @@ from hexaflow.domain.state import (
 )
 from hexaflow.ports.engine import WorkflowEnginePort
 from hexaflow.ports.storage import WorkflowStateStorePort
+
+logger = logging.getLogger(__name__)
 
 
 def _capture_sentry_step_exception(
@@ -62,8 +71,8 @@ def _capture_sentry_step_exception(
             if pool:
                 scope.set_tag("execution_pool", pool)
             sentry_sdk.capture_exception(exc)
-    except Exception:
-        pass
+    except Exception as sentry_exc:
+        logger.debug("Failed to push Sentry failure context: %s", sentry_exc)
 
 
 class AsyncioWorkflowEngine(WorkflowEnginePort):
@@ -189,14 +198,16 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             Terminal or suspended WorkflowExecutionState.
         """
         run_id = str(uuid4())
+        inputs_copy = copy.deepcopy(initial_inputs) if initial_inputs is not None else {}
         state = WorkflowExecutionState(
             run_id=run_id,
             workflow_name=workflow.name,
             status=WorkflowStatus.RUNNING,
+            initial_inputs=inputs_copy,
         )
         self._store.save_run(state)
         skipped = set(skip_steps or ())
-        return await self._execute_workflow(state, workflow, initial_inputs or {}, skipped)
+        return await self._execute_workflow(state, workflow, copy.deepcopy(inputs_copy), skipped)
 
     def resume(
         self,
@@ -241,12 +252,17 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             raise WorkflowSuspended(
                 run_id, "unknown", f"Workflow run '{run_id}' not found in state store."
             )
+        if state.status in (WorkflowStatus.CANCELLED, WorkflowStatus.COMPLETED):
+            raise WorkflowError(
+                f"Cannot resume workflow run '{run_id}' with terminal status {state.status.value}."
+            )
 
+        merged_inputs = {**state.initial_inputs, **(patch_inputs or {})}
         state.status = WorkflowStatus.RUNNING
         state.error_summary = None
         self._store.save_run(state)
         skipped = set(skip_steps or ())
-        return await self._execute_workflow(state, workflow, patch_inputs or {}, skipped)
+        return await self._execute_workflow(state, workflow, merged_inputs, skipped)
 
     def restart(
         self,
@@ -278,13 +294,22 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         Returns:
             Fresh WorkflowExecutionState outcome.
         """
+        try:
+            existing = self._store.get_run(run_id)
+            initial_inputs = existing.initial_inputs if existing else {}
+        except Exception:
+            initial_inputs = {}
+
+        self._store.clear_checkpoints(run_id)
+
         state = WorkflowExecutionState(
             run_id=run_id,
             workflow_name=workflow.name,
             status=WorkflowStatus.RUNNING,
+            initial_inputs=initial_inputs,
         )
         self._store.save_run(state)
-        return await self._execute_workflow(state, workflow, {})
+        return await self._execute_workflow(state, workflow, initial_inputs)
 
     def abort(
         self,
@@ -320,6 +345,9 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         if not state:
             raise WorkflowAborted(f"Workflow run '{run_id}' not found.")
 
+        if state.status == WorkflowStatus.CANCELLED:
+            return state
+
         checkpoints = self._store.get_checkpoints(run_id)
         # Execute compensations for completed steps in reverse order
         for chk in reversed(checkpoints):
@@ -332,6 +360,7 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                             stage_name=chk.stage_name,
                             step_name=chk.step_name,
                             inputs=chk.input_payload if isinstance(chk.input_payload, dict) else {},
+                            output=chk.output_payload,
                         )
                         await self._invoke_callable(step.compensation, ctx)
                 except StepNotFoundError:
@@ -399,15 +428,26 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                 cached_outputs[step.name] = res
         else:
             # CONCURRENT execution for steps in this stage
-            tasks = [
-                self._execute_step(
-                    state, stage, step, cached_outputs, initial_inputs, skipped_steps
-                )
-                for step in stage.steps
-            ]
+            async def _run_wrapped(step_def: StepDefinition) -> tuple[bool, Any]:
+                try:
+                    val = await self._execute_step(
+                        state, stage, step_def, cached_outputs, initial_inputs, skipped_steps
+                    )
+                    return True, val
+                except BaseException as exc:
+                    return False, exc
+
+            tasks = [_run_wrapped(step) for step in stage.steps]
             results = await asyncio.gather(*tasks)
-            for step, res in zip(stage.steps, results, strict=True):
-                cached_outputs[step.name] = res
+            first_err: BaseException | None = None
+            for step, (ok, res) in zip(stage.steps, results, strict=True):
+                if not ok:
+                    if first_err is None:
+                        first_err = res
+                else:
+                    cached_outputs[step.name] = res
+            if first_err is not None:
+                raise first_err
 
     async def _execute_step(
         self,

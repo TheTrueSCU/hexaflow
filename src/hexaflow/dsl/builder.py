@@ -508,6 +508,22 @@ class Workflow:
 
         return WorkflowCliBinder(self, aliases=aliases)
 
+    def bind_store(self, state_store: WorkflowStateStorePort) -> None:
+        """Bind or replace the persistence state store and reconfigure engine.
+
+        Args:
+            state_store: Persistence store implementing WorkflowStateStorePort.
+
+        Raises:
+            TypeError: If the configured engine does not support binding a state store.
+        """
+        if not isinstance(self._engine, AsyncioWorkflowEngine):
+            raise TypeError(
+                f"Configured engine {type(self._engine).__name__} does not support binding a state store."
+            )
+        self._store = state_store
+        self._engine._store = state_store
+
     def close(self) -> None:
         """Shut down underlying engine resources and worker pools."""
         self._engine.close()

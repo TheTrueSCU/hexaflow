@@ -12,14 +12,20 @@ import functools
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any, Protocol, runtime_checkable
 
 import typer
 
 from hexaflow.domain.models import WorkflowDefinition
 
-if TYPE_CHECKING:
-    from hexaflow.dsl.builder import Workflow
+
+@runtime_checkable
+class WorkflowLike(Protocol):
+    """Protocol for objects convertible to a WorkflowDefinition."""
+
+    def to_definition(self) -> WorkflowDefinition:
+        """Convert to compiled immutable WorkflowDefinition."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -48,7 +54,7 @@ class WorkflowCliBinder:
 
     def __init__(
         self,
-        workflow: Workflow | WorkflowDefinition,
+        workflow: WorkflowDefinition | WorkflowLike | Any,
         aliases: dict[str, list[str]] | None = None,
     ) -> None:
         """Initialize WorkflowCliBinder.
@@ -228,4 +234,5 @@ class WorkflowCliBinder:
 __all__ = [
     "CliOptionSpec",
     "WorkflowCliBinder",
+    "WorkflowLike",
 ]
