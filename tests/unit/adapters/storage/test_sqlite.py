@@ -7,7 +7,10 @@ Notes/Architectural Intent:
 
 from pathlib import Path
 
+import pytest
+
 from hexaflow.adapters.storage.sqlite import SqliteStateStore
+from hexaflow.domain.exceptions import CheckpointCorruptError
 from hexaflow.domain.state import (
     CheckpointRecord,
     StepStatus,
@@ -102,3 +105,59 @@ def test_sqlite_large_payload_disk_spillover(tmp_path: Path) -> None:
     assert retrieved is not None
     assert retrieved.output_payload == large_data
     assert retrieved.input_payload == {"seed": 42}
+
+
+def test_sqlite_missing_spillover_raises_corrupt_error(tmp_path: Path) -> None:
+    """Validate that missing disk spillover raises CheckpointCorruptError."""
+    db_file = tmp_path / "state.db"
+    artifacts = tmp_path / "artifacts"
+    store = SqliteStateStore(db_path=db_file, artifacts_dir=artifacts, spillover_threshold_bytes=10)
+
+    chk = CheckpointRecord(
+        run_id="run-corrupt-1",
+        stage_name="stage_a",
+        step_name="step_a",
+        status=StepStatus.COMPLETED,
+        output_payload={"huge": "x" * 100},
+    )
+    store.save_checkpoint(chk)
+
+    # Delete spilled file to simulate disk corruption or missing volume
+    spill_file = artifacts / "run-corrupt-1" / "stage_a" / "step_a_output.bin"
+    assert spill_file.exists() is True
+    spill_file.unlink()
+
+    with pytest.raises(CheckpointCorruptError, match="Spillover payload file missing"):
+        store.get_checkpoint("run-corrupt-1", "step_a")
+
+
+def test_sqlite_clear_checkpoints_and_initial_inputs(tmp_path: Path) -> None:
+    """Validate clearing checkpoints and roundtrip persistence of initial_inputs."""
+    db_file = tmp_path / "state.db"
+    artifacts = tmp_path / "artifacts"
+    store = SqliteStateStore(db_path=db_file, artifacts_dir=artifacts, spillover_threshold_bytes=10)
+
+    state = WorkflowExecutionState(
+        run_id="run-init-1",
+        workflow_name="init_wf",
+        initial_inputs={"batch_size": 64, "env": "prod"},
+    )
+    store.save_run(state)
+
+    rehydrated = store.get_run("run-init-1")
+    assert rehydrated is not None
+    assert rehydrated.initial_inputs == {"batch_size": 64, "env": "prod"}
+
+    chk = CheckpointRecord(
+        run_id="run-init-1",
+        stage_name="stage_1",
+        step_name="step_1",
+        status=StepStatus.COMPLETED,
+        output_payload={"spilled_content": "val" * 50},
+    )
+    store.save_checkpoint(chk)
+    assert len(store.get_checkpoints("run-init-1")) == 1
+
+    store.clear_checkpoints("run-init-1")
+    assert len(store.get_checkpoints("run-init-1")) == 0
+    assert (artifacts / "run-init-1").exists() is False

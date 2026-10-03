@@ -6,8 +6,11 @@ Notes/Architectural Intent:
     compensating rollbacks on abort.
 """
 
+import pytest
+
 from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
 from hexaflow.adapters.storage.in_memory import InMemoryStateStore
+from hexaflow.domain.exceptions import WorkflowError
 from hexaflow.domain.models import (
     ExecutionPool,
     StageDefinition,
@@ -157,7 +160,8 @@ def test_permanent_failure_suspends_workflow_and_resumes_without_rerun() -> None
     assert resumed_res.step_checkpoints["step_3"].status == StepStatus.COMPLETED
 
     # 4. Critical Invariant: Step 1 must NOT have been re-executed!
-    assert step_1_invocations == 1
+    final_step_1_invocations = step_1_invocations
+    assert final_step_1_invocations == 1
 
 
 def test_abort_unwinds_compensations_in_reverse() -> None:
@@ -168,14 +172,14 @@ def test_abort_unwinds_compensations_in_reverse() -> None:
     rollbacks: list[str] = []
 
     def comp_1(ctx: StepContext) -> None:
-        rollbacks.append("comp_1")
+        rollbacks.append(f"comp_1_{ctx.output}")
 
     def comp_2(ctx: StepContext) -> None:
-        rollbacks.append("comp_2")
+        rollbacks.append(f"comp_2_{ctx.output}")
 
-    step_1 = StepDefinition(name="step_1", action=lambda ctx: True, compensation=comp_1)
+    step_1 = StepDefinition(name="step_1", action=lambda ctx: "val_1", compensation=comp_1)
     step_2 = StepDefinition(
-        name="step_2", action=lambda ctx: True, compensation=comp_2, depends_on=("step_1",)
+        name="step_2", action=lambda ctx: "val_2", compensation=comp_2, depends_on=("step_1",)
     )
     step_3 = StepDefinition(
         name="step_3",
@@ -197,8 +201,17 @@ def test_abort_unwinds_compensations_in_reverse() -> None:
 
     abort_res = engine.abort(res.run_id, wf)
     assert abort_res.status == WorkflowStatus.CANCELLED
-    # Reverse order: step 2 compensated before step 1
-    assert rollbacks == ["comp_2", "comp_1"]
+    # Reverse order with step outputs: step 2 compensated before step 1
+    assert rollbacks == ["comp_2_val_2", "comp_1_val_1"]
+
+    # Abort idempotency: re-aborting does not duplicate rollbacks
+    second_abort = engine.abort(res.run_id, wf)
+    assert second_abort.status == WorkflowStatus.CANCELLED
+    assert rollbacks == ["comp_2_val_2", "comp_1_val_1"]
+
+    # Resume on CANCELLED run raises WorkflowError
+    with pytest.raises(WorkflowError, match="Cannot resume workflow run"):
+        engine.resume(res.run_id, wf)
 
 
 def test_explicit_step_skipping() -> None:
@@ -663,7 +676,6 @@ def test_step_execution_in_thread_and_process_pools() -> None:
         execute correctly outside the asyncio event loop and return output payloads.
     """
     store = InMemoryStateStore()
-    engine = AsyncioWorkflowEngine(state_store=store, max_process_workers=2, max_thread_workers=2)
 
     step_thread = StepDefinition(
         name="thread_step",
@@ -683,7 +695,9 @@ def test_step_execution_in_thread_and_process_pools() -> None:
     )
     wf = WorkflowDefinition(name="pools_wf", stages=(stage,))
 
-    try:
+    with AsyncioWorkflowEngine(
+        state_store=store, max_process_workers=2, max_thread_workers=2
+    ) as engine:
         res = engine.run(wf)
         status = res.status
         assert status == WorkflowStatus.COMPLETED
@@ -693,8 +707,6 @@ def test_step_execution_in_thread_and_process_pools() -> None:
 
         out_proc = res.step_checkpoints["proc_step"].output_payload
         assert out_proc == "processed_proc_step"
-    finally:
-        engine.close()
 
 
 def test_mapped_step_execution_in_process_pool() -> None:
@@ -705,7 +717,6 @@ def test_mapped_step_execution_in_process_pool() -> None:
         aggregates results cleanly.
     """
     store = InMemoryStateStore()
-    engine = AsyncioWorkflowEngine(state_store=store, max_process_workers=2)
 
     step_src = StepDefinition(name="numbers", action=lambda ctx: [2, 4, 6])
     step_map = StepDefinition(
@@ -721,14 +732,12 @@ def test_mapped_step_execution_in_process_pool() -> None:
     stage_2 = StageDefinition(name="map_stage", steps=(step_map,))
     wf = WorkflowDefinition(name="mapped_proc_wf", stages=(stage_1, stage_2))
 
-    try:
+    with AsyncioWorkflowEngine(state_store=store, max_process_workers=2) as engine:
         res = engine.run(wf)
         status = res.status
         assert status == WorkflowStatus.COMPLETED
         payload = res.step_checkpoints["squared"].output_payload
         assert payload == [4, 16, 36]
-    finally:
-        engine.close()
 
 
 async def test_engine_pools_lifecycle_and_context_managers() -> None:

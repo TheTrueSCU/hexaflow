@@ -62,6 +62,10 @@ class StepContext(BaseModel):
     inputs: dict[str, Any] = Field(
         default_factory=dict, description="Resolved input arguments passed to this step."
     )
+    output: Any = Field(
+        default=None,
+        description="Output payload result of the step, available during compensation.",
+    )
     checkpoint_dir: str | None = Field(
         default=None, description="Path to the scratch directory for this step."
     )
@@ -123,6 +127,10 @@ class WorkflowExecutionState(BaseModel):
     step_checkpoints: dict[str, CheckpointRecord] = Field(
         default_factory=dict,
         description="Map of step_name to its latest CheckpointRecord.",
+    )
+    initial_inputs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Initial inputs supplied to the workflow run.",
     )
     error_summary: str | None = Field(
         default=None, description="High-level error summary if suspended or failed."

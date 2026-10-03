@@ -508,6 +508,17 @@ class Workflow:
 
         return WorkflowCliBinder(self, aliases=aliases)
 
+    def bind_store(self, state_store: WorkflowStateStorePort) -> None:
+        """Bind or replace the persistence state store and reconfigure engine.
+
+        Args:
+            state_store: Persistence store implementing WorkflowStateStorePort.
+        """
+        self._store = state_store
+        engine = self._engine
+        if isinstance(engine, AsyncioWorkflowEngine):
+            engine._store = state_store
+
     def close(self) -> None:
         """Shut down underlying engine resources and worker pools."""
         self._engine.close()

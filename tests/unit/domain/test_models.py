@@ -298,12 +298,13 @@ def test_workflow_to_mermaid_and_ascii() -> None:
 
     stage_1 = StageDefinition(name="source", steps=(step_a,))
     stage_2 = StageDefinition(
-        name="compute", steps=(step_b, step_c), execution_mode=StageExecutionMode.CONCURRENT_ALL
+        name="compute", steps=(step_b,), execution_mode=StageExecutionMode.CONCURRENT_ALL
     )
+    stage_3 = StageDefinition(name="sink", steps=(step_c,))
 
     workflow = WorkflowDefinition(
         name="etl_pipeline",
-        stages=(stage_1, stage_2),
+        stages=(stage_1, stage_2, stage_3),
         version="2.0.0",
     )
 

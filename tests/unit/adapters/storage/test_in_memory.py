@@ -62,3 +62,7 @@ def test_in_memory_checkpoints_lifecycle() -> None:
 
     missing_chk = store.get_checkpoint(run_id, "phantom_step")
     assert missing_chk is None
+
+    store.clear_checkpoints(run_id)
+    cleared_chks = store.get_checkpoints(run_id)
+    assert len(cleared_chks) == 0

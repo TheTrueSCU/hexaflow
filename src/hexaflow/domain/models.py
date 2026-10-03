@@ -76,6 +76,8 @@ def evaluate_trigger_rule(rule: TriggerRule, parent_statuses: list[StepStatus]) 
             return failures == 0
         case TriggerRule.ALL_SUCCESS_OR_SKIPPED:
             return failures == 0 and (successes + skips) == total
+        case _:
+            return False
 
 
 class StageExecutionMode(StrEnum):
@@ -209,6 +211,38 @@ class StageDefinition(BaseModel):
         return steps
 
 
+def _validate_dependency_schedule(stages: tuple[StageDefinition, ...]) -> None:
+    """Validate that dependencies are scheduled strictly before their dependents.
+
+    Args:
+        stages: Ordered workflow stages containing steps.
+
+    Raises:
+        InvalidWorkflowDAGError: If a step depends on a step scheduled concurrently or later.
+    """
+    position: dict[str, tuple[int, int]] = {}
+    for s_idx, stage in enumerate(stages):
+        for p_idx, step in enumerate(stage.steps):
+            position[step.name] = (s_idx, p_idx)
+
+    for stage in stages:
+        for step in stage.steps:
+            s_idx, p_idx = position[step.name]
+            for dep in step.depends_on:
+                if dep not in position:
+                    continue
+                d_stage, d_pos = position[dep]
+                same_stage_ok = (
+                    d_stage == s_idx
+                    and stage.execution_mode == StageExecutionMode.SEQUENTIAL
+                    and d_pos < p_idx
+                )
+                if d_stage > s_idx or (d_stage == s_idx and not same_stage_ok):
+                    raise InvalidWorkflowDAGError(
+                        f"Step '{step.name}' depends on '{dep}', which is not scheduled before it."
+                    )
+
+
 class WorkflowDefinition(BaseModel):
     """Complete immutable blueprint of a multi-stage, multi-step workflow DAG.
 
@@ -238,10 +272,11 @@ class WorkflowDefinition(BaseModel):
         Raises:
             DuplicateStepError: If duplicate step names exist across any stages.
             StepNotFoundError: If a step depends on an unregistered step name.
-            InvalidWorkflowDAGError: If the dependency graph contains circular cycles.
+            InvalidWorkflowDAGError: If the dependency graph contains circular cycles or out-of-order dependencies.
 
         Notes/Architectural Intent:
-            Uses Python's standard library TopologicalSorter to guarantee cycle-free DAG topology.
+            Uses TopologicalSorter to guarantee cycle-free DAG topology and verifies
+            that all dependencies are scheduled in prior stages or earlier sequential steps.
         """
         all_steps: dict[str, StepDefinition] = {}
         for stage in self.stages:
@@ -269,6 +304,8 @@ class WorkflowDefinition(BaseModel):
             sorter.prepare()
         except CycleError as err:
             raise InvalidWorkflowDAGError(f"Workflow DAG contains a circular cycle: {err}") from err
+
+        _validate_dependency_schedule(self.stages)
 
         return self
 
