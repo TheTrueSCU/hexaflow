@@ -161,3 +161,32 @@ def test_sqlite_clear_checkpoints_and_initial_inputs(tmp_path: Path) -> None:
     store.clear_checkpoints("run-init-1")
     assert len(store.get_checkpoints("run-init-1")) == 0
     assert (artifacts / "run-init-1").exists() is False
+
+
+def test_sqlite_migration_adds_initial_inputs(tmp_path: Path) -> None:
+    """Validate schema migration adds initial_inputs column if missing on startup."""
+    import sqlite3
+
+    db_file = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_file)
+    conn.execute(
+        """
+        CREATE TABLE workflow_runs (
+            run_id TEXT PRIMARY KEY,
+            workflow_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            current_stage TEXT,
+            error_summary TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT
+        );
+        """
+    )
+    conn.close()
+
+    # Instantiating store triggers migration
+    store = SqliteStateStore(db_path=db_file)
+    with store._connection() as c:
+        cursor = c.execute("PRAGMA table_info(workflow_runs);")
+        col_names = [r["name"] for r in cursor.fetchall()]
+        assert "initial_inputs" in col_names

@@ -822,3 +822,26 @@ def test_engine_resume_and_abort_missing_run_and_input_merging() -> None:
     assert resumed.status == WorkflowStatus.COMPLETED
     output = resumed.step_checkpoints["step_1"].output_payload
     assert output == {"base": 1, "override": 99, "new_key": 42}
+
+
+def test_concurrent_stage_step_failure() -> None:
+    """Validate exception handling and sibling settling in concurrent stage execution."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_1 = StepDefinition(
+        name="s1",
+        action=lambda ctx: (_ for _ in ()).throw(RuntimeError("concurrent fail")),
+    )
+    step_2 = StepDefinition(name="s2", action=lambda ctx: "s2_ok")
+
+    stage = StageDefinition(
+        name="conc_stage",
+        steps=(step_1, step_2),
+        execution_mode=StageExecutionMode.CONCURRENT_ALL,
+    )
+    wf = WorkflowDefinition(name="fail_conc_wf", stages=(stage,))
+
+    res = engine.run(wf)
+    assert res.status == WorkflowStatus.SUSPENDED
+    assert "concurrent fail" in (res.error_summary or "")

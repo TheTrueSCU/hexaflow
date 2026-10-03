@@ -263,6 +263,14 @@ def test_trigger_rules_evaluation() -> None:
         is False
     )
 
+    # Unknown trigger rule returns False
+    from typing import cast
+
+    unknown_rule_res = evaluate_trigger_rule(
+        cast(TriggerRule, "UNKNOWN_RULE"), [StepStatus.COMPLETED]
+    )
+    assert unknown_rule_res is False
+
 
 def test_validate_dependency_schedule_rejects_out_of_order_dependencies() -> None:
     """Validate that forward dependencies or concurrent dependencies are rejected."""
@@ -292,6 +300,13 @@ def test_validate_dependency_schedule_rejects_out_of_order_dependencies() -> Non
     stage_b = StageDefinition(name="stage_b", steps=(step_2,))
     with pytest.raises(InvalidWorkflowDAGError, match="not scheduled before it"):
         WorkflowDefinition(name="bad_future_wf", stages=(stage_a, stage_b))
+
+    # 4. External/undeclared dependency skips schedule check
+    from hexaflow.domain.models import _validate_dependency_schedule
+
+    step_ext = StepDefinition(name="step_ext", action=lambda ctx: 1, depends_on=("ext_dep",))
+    stage_ext = StageDefinition(name="stage_ext", steps=(step_ext,))
+    _validate_dependency_schedule((stage_ext,))
 
 
 def test_step_definition_mapping_attributes() -> None:
