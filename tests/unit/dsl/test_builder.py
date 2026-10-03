@@ -245,3 +245,18 @@ def test_dsl_bind_store(tmp_path: Path) -> None:
     engine = wf._engine
     assert isinstance(engine, AsyncioWorkflowEngine)
     assert engine._store is new_store
+
+
+def test_dsl_bind_store_invalid_engine() -> None:
+    """Validate bind_store raises TypeError when engine does not support store binding."""
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    from hexaflow.adapters.storage.in_memory import InMemoryStateStore
+    from hexaflow.ports.engine import WorkflowEnginePort
+
+    engine = MagicMock(spec=WorkflowEnginePort)
+    wf = Workflow("dummy_wf", engine=engine)
+    with pytest.raises(TypeError, match="does not support binding a state store"):
+        wf.bind_store(InMemoryStateStore())

@@ -845,3 +845,69 @@ def test_concurrent_stage_step_failure() -> None:
     res = engine.run(wf)
     assert res.status == WorkflowStatus.SUSPENDED
     assert "concurrent fail" in (res.error_summary or "")
+    assert "s2" in res.step_checkpoints
+    assert res.step_checkpoints["s2"].status == StepStatus.COMPLETED
+
+
+def test_concurrent_stage_returned_exception_object() -> None:
+    """Validate returning an Exception instance from a step is treated as a valid output value."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    returned_err = ValueError("returned value, not raised")
+    step_1 = StepDefinition(name="s1", action=lambda ctx: returned_err)
+    step_2 = StepDefinition(name="s2", action=lambda ctx: "s2_ok")
+
+    stage = StageDefinition(
+        name="conc_return_stage",
+        steps=(step_1, step_2),
+        execution_mode=StageExecutionMode.CONCURRENT_ALL,
+    )
+    wf = WorkflowDefinition(name="return_exc_wf", stages=(stage,))
+
+    res = engine.run(wf)
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["s1"].output_payload == returned_err
+
+
+def test_initial_inputs_deepcopied_isolation() -> None:
+    """Validate step mutations on inputs do not mutate the persisted initial_inputs."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    def _mutate(ctx: StepContext) -> str:
+        ctx.inputs["nested"]["counter"] += 10
+        return "done"
+
+    step_1 = StepDefinition(name="s1", action=_mutate)
+    stage = StageDefinition(name="stage1", steps=(step_1,))
+    wf = WorkflowDefinition(name="mutate_wf", stages=(stage,))
+
+    init = {"nested": {"counter": 1}}
+    res = engine.run(wf, initial_inputs=init)
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.initial_inputs["nested"]["counter"] == 1
+
+
+def test_restart_handles_corrupt_checkpoint_store(monkeypatch) -> None:
+    """Validate restart clears checkpoints even if get_run raises CheckpointCorruptError."""
+    from hexaflow.domain.exceptions import CheckpointCorruptError
+
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    wf = WorkflowDefinition(
+        name="restart_corrupt_wf",
+        stages=(
+            StageDefinition(name="stg", steps=(StepDefinition(name="s1", action=lambda ctx: 42),)),
+        ),
+    )
+    res = engine.run(wf)
+    assert res.status == WorkflowStatus.COMPLETED
+
+    def _corrupt_get_run(run_id: str):
+        raise CheckpointCorruptError("Simulated corruption")
+
+    monkeypatch.setattr(store, "get_run", _corrupt_get_run)
+    restarted = engine.restart(res.run_id, wf)
+    assert restarted.status == WorkflowStatus.COMPLETED

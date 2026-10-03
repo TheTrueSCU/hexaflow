@@ -190,3 +190,32 @@ def test_sqlite_migration_adds_initial_inputs(tmp_path: Path) -> None:
         cursor = c.execute("PRAGMA table_info(workflow_runs);")
         col_names = [r["name"] for r in cursor.fetchall()]
         assert "initial_inputs" in col_names
+
+
+def test_sqlite_empty_initial_inputs_roundtrip(tmp_path: Path) -> None:
+    """Validate that an explicitly empty initial_inputs dict is persisted cleanly."""
+    store = SqliteStateStore(db_path=tmp_path / "empty_inputs.db")
+    state = WorkflowExecutionState(
+        run_id="run-empty-1",
+        workflow_name="wf_empty",
+        initial_inputs={},
+    )
+    store.save_run(state)
+    rehydrated = store.get_run("run-empty-1")
+    assert rehydrated is not None
+    assert rehydrated.initial_inputs == {}
+
+
+def test_sqlite_clear_checkpoints_path_traversal_safe(tmp_path: Path) -> None:
+    """Validate clear_checkpoints safely ignores paths attempting directory traversal."""
+    outside_dir = tmp_path / "important_dir"
+    outside_dir.mkdir()
+    (outside_dir / "keep.txt").write_text("precious")
+
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    store = SqliteStateStore(db_path=tmp_path / "safe.db", artifacts_dir=artifacts)
+
+    # Attempt path traversal
+    store.clear_checkpoints("../../important_dir")
+    assert (outside_dir / "keep.txt").exists() is True

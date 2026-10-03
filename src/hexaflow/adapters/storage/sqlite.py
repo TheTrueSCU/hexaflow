@@ -209,7 +209,7 @@ class SqliteStateStore(WorkflowStateStorePort):
                     state.started_at.isoformat(),
                     state.finished_at.isoformat() if state.finished_at else None,
                     json.dumps(state.initial_inputs, cls=_StateJSONEncoder)
-                    if state.initial_inputs
+                    if state.initial_inputs is not None
                     else None,
                 ),
             )
@@ -348,12 +348,16 @@ class SqliteStateStore(WorkflowStateStorePort):
             run_id: Parent workflow execution ID.
         """
         with self._lock:
-            run_artifacts = self._artifacts_dir / run_id
-            if run_artifacts.exists():
-                shutil.rmtree(run_artifacts, ignore_errors=True)
             with self._connection() as conn:
                 conn.execute("DELETE FROM step_checkpoints WHERE run_id = ?", (run_id,))
                 conn.commit()
+            safe_run_id = Path(run_id).name
+            run_artifacts = (self._artifacts_dir / safe_run_id).resolve()
+            if (
+                run_artifacts.is_relative_to(self._artifacts_dir.resolve())
+                and run_artifacts.exists()
+            ):
+                shutil.rmtree(run_artifacts, ignore_errors=True)
 
     def _row_to_checkpoint(self, row: sqlite3.Row) -> CheckpointRecord:
         """Convert a database row into a domain CheckpointRecord."""

@@ -9,6 +9,7 @@ Notes/Architectural Intent:
 
 import asyncio
 import concurrent.futures
+import copy
 import inspect
 import logging
 import multiprocessing
@@ -197,15 +198,16 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             Terminal or suspended WorkflowExecutionState.
         """
         run_id = str(uuid4())
+        inputs_copy = copy.deepcopy(initial_inputs) if initial_inputs is not None else {}
         state = WorkflowExecutionState(
             run_id=run_id,
             workflow_name=workflow.name,
             status=WorkflowStatus.RUNNING,
-            initial_inputs=initial_inputs or {},
+            initial_inputs=inputs_copy,
         )
         self._store.save_run(state)
         skipped = set(skip_steps or ())
-        return await self._execute_workflow(state, workflow, initial_inputs or {}, skipped)
+        return await self._execute_workflow(state, workflow, copy.deepcopy(inputs_copy), skipped)
 
     def resume(
         self,
@@ -292,8 +294,11 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         Returns:
             Fresh WorkflowExecutionState outcome.
         """
-        existing = self._store.get_run(run_id)
-        initial_inputs = existing.initial_inputs if existing else {}
+        try:
+            existing = self._store.get_run(run_id)
+            initial_inputs = existing.initial_inputs if existing else {}
+        except Exception:
+            initial_inputs = {}
 
         self._store.clear_checkpoints(run_id)
 
@@ -423,16 +428,20 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                 cached_outputs[step.name] = res
         else:
             # CONCURRENT execution for steps in this stage
-            tasks = [
-                self._execute_step(
-                    state, stage, step, cached_outputs, initial_inputs, skipped_steps
-                )
-                for step in stage.steps
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            async def _run_wrapped(step_def: StepDefinition) -> tuple[bool, Any]:
+                try:
+                    val = await self._execute_step(
+                        state, stage, step_def, cached_outputs, initial_inputs, skipped_steps
+                    )
+                    return True, val
+                except BaseException as exc:
+                    return False, exc
+
+            tasks = [_run_wrapped(step) for step in stage.steps]
+            results = await asyncio.gather(*tasks)
             first_err: BaseException | None = None
-            for step, res in zip(stage.steps, results, strict=True):
-                if isinstance(res, BaseException):
+            for step, (ok, res) in zip(stage.steps, results, strict=True):
+                if not ok:
                     if first_err is None:
                         first_err = res
                 else:
