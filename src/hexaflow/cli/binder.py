@@ -25,7 +25,6 @@ class WorkflowLike(Protocol):
 
     def to_definition(self) -> WorkflowDefinition:
         """Convert to compiled immutable WorkflowDefinition."""
-        ...
 
 
 @dataclass(frozen=True)

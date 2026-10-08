@@ -1,0 +1,31 @@
+version: 2
+language: "en-US"
+
+reviews:
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+
+  path_filters:
+    - "!uv.lock"
+    - "!examples/**/uv.lock"
+    - "!graphify-out/**"
+    - "!.codegraph/**"
+    - "!docs/**"
+    - "!tests/snapshots/**"
+    - "!**/*.svg"
+    - "!**/*.min.*"
+
+  high_level_summary: true
+  poem: false
+  collapse_walkthrough: true
+  request_changes_workflow: false
+
+  auto_review_instructions: |
+    Focus strictly on hexagonal layer boundaries, security vulnerabilities,
+    race conditions, and edge-case correctness bugs. Skip formatting and stylistic nits.
+
+chat:
+  auto_reply: true

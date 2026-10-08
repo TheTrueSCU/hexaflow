@@ -1,0 +1,13 @@
+# CI Workflows & actions (prevent sequential job steps from triggering efferent coupling warnings)
+.github/**
+
+# Test suites & fixtures (tests naturally maintain high fan-out for fixtures and assertions)
+tests/**
+**/tests/**
+
+# Build artifacts, caches, and minified assets
+graphify-out/**
+.codegraph/**
+dist/**
+build/**
+*.min.*

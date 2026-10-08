@@ -79,6 +79,8 @@ def evaluate_trigger_rule(rule: TriggerRule, parent_statuses: list[StepStatus]) 
         case _:
             return False
 
+    return False
+
 
 class StageExecutionMode(StrEnum):
     """Execution concurrency mode for steps within a stage.
