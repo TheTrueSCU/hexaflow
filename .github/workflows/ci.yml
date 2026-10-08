@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run Quality Gate via Hexaqual
-        uses: TheTrueSCU/hexaqual@v0.8.0
+        uses: TheTrueSCU/hexaqual@1a37ad125f86dacd57616e1c1b3fab56185e50c3 # v0.9.1
         with:
           sync-args: "--all-extras --dev"
 

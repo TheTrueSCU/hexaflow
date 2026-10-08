@@ -1,13 +1,37 @@
-version: 2
-updates:
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+# Dependabot configuration for Hexaflow.
+#
+# Notes:
+#   - uv ecosystem manages uv.lock for root workspace.
+#   - Dependencies are grouped to reduce PR noise.
+#   - GitHub Actions updates are separate from Python dependency updates.
 
-  - package-ecosystem: "github-actions"
-    directory: "/"
+version: 2
+
+updates:
+
+  # ── GitHub Actions ──────────────────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+      interval: weekly
+      day: tuesday
+      time: "05:00"
+      timezone: UTC
+    groups:
+      actions-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    labels: [dependencies, github-actions]
+
+  # ── Python: Workspace Root (uv) ─────────────────────────────────────────────
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: UTC
+    groups:
+      workspace-deps:
+        patterns: ["*"]
+    labels: [dependencies, python, uv]

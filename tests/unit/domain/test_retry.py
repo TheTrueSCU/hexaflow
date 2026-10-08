@@ -4,6 +4,8 @@ Notes/Architectural Intent:
     Tests constant, linear, and exponential backoff calculations and retry decision logic.
 """
 
+from typing import cast
+
 from hexaflow.domain.retry import BackoffType, RetryPolicy
 
 
@@ -97,3 +99,15 @@ def test_jittered_delay_stays_within_bounds() -> None:
         delay = policy.calculate_delay(attempt=1)
         in_bounds = 0.0 <= delay <= 4.0
         assert in_bounds is True
+
+
+def test_fallback_unrecognized_backoff_type() -> None:
+    """Validate unknown backoff type safely defaults to initial_delay_seconds."""
+    policy = RetryPolicy(
+        max_attempts=3,
+        backoff_type=cast(BackoffType, "UNKNOWN"),
+        initial_delay_seconds=3.5,
+        jitter=False,
+    )
+    delay = policy.calculate_delay(attempt=2)
+    assert delay == 3.5

@@ -434,12 +434,12 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                         state, stage, step_def, cached_outputs, initial_inputs, skipped_steps
                     )
                     return True, val
-                except BaseException as exc:
+                except Exception as exc:
                     return False, exc
 
             tasks = [_run_wrapped(step) for step in stage.steps]
             results = await asyncio.gather(*tasks)
-            first_err: BaseException | None = None
+            first_err: Exception | None = None
             for step, (ok, res) in zip(stage.steps, results, strict=True):
                 if not ok:
                     if first_err is None:
