@@ -292,3 +292,33 @@ def test_workflow_dsl_graph_and_renderers() -> None:
     # Test image rendering (ascii fallback provides svg)
     svg_bytes = wf.render_image("ascii", "svg")
     assert svg_bytes.startswith(b"<svg")
+
+
+def test_workflow_dsl_simulate_and_fault_injection() -> None:
+    """Validate wf.simulate() and async simulate with mock and fault injection."""
+    wf = Workflow("sim_wf")
+
+    executed_side_effect = False
+
+    @wf.step("query_records")
+    def query_records(ctx):
+        return {"users": ["alice", "bob"]}
+
+    @wf.step(
+        "notify_users", depends_on=["query_records"], side_effects=True, dry_run={"delivered": 2}
+    )
+    def notify_users(ctx):
+        nonlocal executed_side_effect
+        executed_side_effect = True
+        return {"delivered": 100}
+
+    # Run simulation
+    sim_state = wf.simulate()
+    assert sim_state.status == WorkflowStatus.COMPLETED
+    assert executed_side_effect is False
+    assert sim_state.step_checkpoints["notify_users"].output_payload == {"delivered": 2}
+
+    # Test simulate with fault injection
+    fault_state = wf.simulate(fault_injection={"query_records": TimeoutError("Simulated timeout")})
+    assert fault_state.status == WorkflowStatus.SUSPENDED
+    assert fault_state.step_checkpoints["query_records"].status == StepStatus.FAILED

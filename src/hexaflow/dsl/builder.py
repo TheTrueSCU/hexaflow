@@ -464,35 +464,107 @@ class Workflow:
         self,
         initial_inputs: dict[str, Any] | None = None,
         skip_steps: set[str] | list[str] | None = None,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> WorkflowExecutionState:
         """Synchronously execute the workflow from start to finish.
 
         Args:
             initial_inputs: Optional dictionary of inputs for root steps.
             skip_steps: Optional collection of step names to explicitly skip.
+            dry_run: When True, simulates workflow execution without running side-effecting steps.
+            allow_unsafe: When True in dry_run mode, executes side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
 
         Returns:
             Final or suspended WorkflowExecutionState.
         """
         definition = self.to_definition()
-        return self._engine.run(definition, initial_inputs, skip_steps=skip_steps)
+        return self._engine.run(
+            definition,
+            initial_inputs,
+            skip_steps=skip_steps,
+            dry_run=dry_run,
+            allow_unsafe=allow_unsafe,
+            fault_injection=fault_injection,
+        )
 
     async def run_async(
         self,
         initial_inputs: dict[str, Any] | None = None,
         skip_steps: set[str] | list[str] | None = None,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> WorkflowExecutionState:
         """Asynchronously execute the workflow from start to finish.
 
         Args:
             initial_inputs: Optional dictionary of inputs for root steps.
             skip_steps: Optional collection of step names to explicitly skip.
+            dry_run: When True, simulates workflow execution without running side-effecting steps.
+            allow_unsafe: When True in dry_run mode, executes side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
 
         Returns:
             Final or suspended WorkflowExecutionState.
         """
         definition = self.to_definition()
-        return await self._engine.run_async(definition, initial_inputs, skip_steps=skip_steps)
+        return await self._engine.run_async(
+            definition,
+            initial_inputs,
+            skip_steps=skip_steps,
+            dry_run=dry_run,
+            allow_unsafe=allow_unsafe,
+            fault_injection=fault_injection,
+        )
+
+    def simulate(
+        self,
+        initial_inputs: dict[str, Any] | None = None,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
+    ) -> WorkflowExecutionState:
+        """Convenience method to execute a dry-run simulation of the workflow.
+
+        Args:
+            initial_inputs: Optional dictionary of inputs for root steps.
+            allow_unsafe: When True, allows execution of side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
+
+        Returns:
+            Simulated WorkflowExecutionState.
+        """
+        return self.run(
+            initial_inputs=initial_inputs,
+            dry_run=True,
+            allow_unsafe=allow_unsafe,
+            fault_injection=fault_injection,
+        )
+
+    async def simulate_async(
+        self,
+        initial_inputs: dict[str, Any] | None = None,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
+    ) -> WorkflowExecutionState:
+        """Convenience coroutine to execute an asynchronous dry-run simulation.
+
+        Args:
+            initial_inputs: Optional dictionary of inputs for root steps.
+            allow_unsafe: When True, allows execution of side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
+
+        Returns:
+            Simulated WorkflowExecutionState.
+        """
+        return await self.run_async(
+            initial_inputs=initial_inputs,
+            dry_run=True,
+            allow_unsafe=allow_unsafe,
+            fault_injection=fault_injection,
+        )
 
     def resume(
         self,

@@ -911,3 +911,93 @@ def test_restart_handles_corrupt_checkpoint_store(monkeypatch) -> None:
     monkeypatch.setattr(store, "get_run", _corrupt_get_run)
     restarted = engine.restart(res.run_id, wf)
     assert restarted.status == WorkflowStatus.COMPLETED
+
+
+def test_dry_run_simulation_safe_and_mocked() -> None:
+    """Validate that dry-run mode executes safe steps and uses mocks for side effects."""
+
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    executed_side_effect = False
+
+    def real_side_effect(ctx: StepContext) -> str:
+        nonlocal executed_side_effect
+        executed_side_effect = True
+        return "real_db_write"
+
+    step_read = StepDefinition(name="read_data", action=lambda ctx: {"items": [1, 2]})
+    step_write = StepDefinition(
+        name="write_db",
+        action=real_side_effect,
+        depends_on=("read_data",),
+        side_effects=True,
+        dry_run="mock_db_result",
+    )
+
+    stage = StageDefinition(name="pipeline", steps=(step_read, step_write))
+    wf = WorkflowDefinition(name="dry_run_wf", stages=(stage,))
+
+    res = engine.run(wf, dry_run=True)
+    assert res.status == WorkflowStatus.COMPLETED
+    assert executed_side_effect is False
+    assert res.step_checkpoints["write_db"].output_payload == "mock_db_result"
+
+
+def test_dry_run_unsafe_step_raises_error() -> None:
+    """Validate that dry-run aborts if a side-effect step lacks dry_run mock without allow_unsafe."""
+
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_unsafe = StepDefinition(
+        name="delete_table",
+        action=lambda ctx: "deleted",
+        side_effects=True,
+        dry_run=None,
+    )
+    stage = StageDefinition(name="stage1", steps=(step_unsafe,))
+    wf = WorkflowDefinition(name="unsafe_wf", stages=(stage,))
+
+    res = engine.run(wf, dry_run=True)
+    assert res.status == WorkflowStatus.SUSPENDED
+    assert "DryRunUnsafeStepError" in (res.error_summary or "")
+
+
+def test_dry_run_allow_unsafe_flag() -> None:
+    """Validate that allow_unsafe=True permits executing side effects in dry-run mode."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    executed = False
+
+    def action_fn(ctx: StepContext) -> str:
+        nonlocal executed
+        executed = True
+        return "executed"
+
+    step = StepDefinition(name="step_unsafe", action=action_fn, side_effects=True, dry_run=None)
+    stage = StageDefinition(name="s", steps=(step,))
+    wf = WorkflowDefinition(name="allow_unsafe_wf", stages=(stage,))
+
+    res = engine.run(wf, dry_run=True, allow_unsafe=True)
+    assert res.status == WorkflowStatus.COMPLETED
+    assert executed is True
+
+
+def test_fault_injection_simulation() -> None:
+    """Validate fault injection triggers synthetic failures during execution."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step1 = StepDefinition(name="s1", action=lambda ctx: "s1_ok")
+    step2 = StepDefinition(name="s2", action=lambda ctx: "s2_ok", depends_on=("s1",))
+    stage = StageDefinition(name="stg", steps=(step1, step2))
+    wf = WorkflowDefinition(name="fault_wf", stages=(stage,))
+
+    injected = RuntimeError("Synthetic chaos failure")
+    res = engine.run(wf, fault_injection={"s1": injected})
+
+    assert res.status == WorkflowStatus.SUSPENDED
+    assert res.step_checkpoints["s1"].status == StepStatus.FAILED
+    assert "Synthetic chaos failure" in (res.error_summary or "")
