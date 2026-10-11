@@ -1254,3 +1254,159 @@ def test_mapped_sub_step_middleware_modifies_item() -> None:
     output = res.step_checkpoints["echo_item"].output_payload
     # If item was modified from 10->20 and 20->40 by middleware, action computes item + 1: [21, 41]
     assert output == [21, 41]
+
+
+def test_engine_middleware_sync_return() -> None:
+    """Validate synchronous return branch in _execute_with_middleware (line 175)."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    class SyncMiddleware:
+        def __call__(self, ctx: StepContext, next_call: Any) -> Any:
+            # Short-circuit and return a direct synchronous string without awaiting
+            return "sync_intercepted"
+
+    engine.use(SyncMiddleware())
+    step = StepDefinition(name="sync_step", action=lambda ctx: "actual")
+    wf = WorkflowDefinition(
+        name="sync_mw_wf",
+        stages=(StageDefinition(name="stg", steps=(step,)),),
+    )
+    res = engine.run(wf)
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["sync_step"].output_payload == "sync_intercepted"
+
+
+def test_engine_dry_run_callable_and_constant_mock_fallbacks() -> None:
+    """Validate dry-run execution with callable and constant mock fallbacks for scalar and mapped steps."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_side_effect_callable = StepDefinition(
+        name="scalar_callable_dry",
+        action=lambda ctx: "real_side_effect",
+        side_effects=True,
+        dry_run=lambda ctx: "mocked_callable_scalar",
+    )
+    step_constant_dry = StepDefinition(
+        name="scalar_const_dry",
+        action=lambda ctx: "real_const",
+        dry_run="mocked_constant_scalar",
+    )
+    step_callable_dry = StepDefinition(
+        name="scalar_callable_non_side_effect",
+        action=lambda ctx: "real_callable",
+        dry_run=lambda ctx: "mocked_callable_non_side_effect",
+    )
+    step_mapped_callable_side_effect = StepDefinition(
+        name="map_callable_side_effect",
+        action=lambda item: f"real_{item}",
+        is_mapped=True,
+        map_over="items",
+        side_effects=True,
+        dry_run=lambda item: f"mock_mapped_{item}",
+    )
+    step_mapped_const_side_effect = StepDefinition(
+        name="map_const_side_effect",
+        action=lambda item: f"real_{item}",
+        is_mapped=True,
+        map_over="items",
+        side_effects=True,
+        dry_run="mock_const_side_effect_item",
+    )
+    step_mapped_const = StepDefinition(
+        name="map_const",
+        action=lambda item: f"real_{item}",
+        is_mapped=True,
+        map_over="items",
+        dry_run="mock_const_item",
+    )
+    step_mapped_callable = StepDefinition(
+        name="map_callable",
+        action=lambda item: f"real_{item}",
+        is_mapped=True,
+        map_over="items",
+        dry_run=lambda item: f"simulated_{item}",
+    )
+    step_mapped_no_mock = StepDefinition(
+        name="map_no_mock",
+        action=lambda item: f"executed_{item}",
+        is_mapped=True,
+        map_over="items",
+        side_effects=False,
+    )
+
+    wf = WorkflowDefinition(
+        name="dry_run_mocks_wf",
+        stages=(
+            StageDefinition(
+                name="stg",
+                steps=(
+                    step_side_effect_callable,
+                    step_constant_dry,
+                    step_callable_dry,
+                    step_mapped_callable_side_effect,
+                    step_mapped_const_side_effect,
+                    step_mapped_const,
+                    step_mapped_callable,
+                    step_mapped_no_mock,
+                ),
+            ),
+        ),
+    )
+
+    res = engine.run(wf, initial_inputs={"items": ["alpha", "beta"]}, dry_run=True)
+    assert res.status == WorkflowStatus.COMPLETED
+    checkpoints = res.step_checkpoints
+    assert checkpoints["scalar_callable_dry"].output_payload == "mocked_callable_scalar"
+    assert checkpoints["scalar_const_dry"].output_payload == "mocked_constant_scalar"
+    assert (
+        checkpoints["scalar_callable_non_side_effect"].output_payload
+        == "mocked_callable_non_side_effect"
+    )
+    assert checkpoints["map_callable_side_effect"].output_payload == [
+        "mock_mapped_alpha",
+        "mock_mapped_beta",
+    ]
+    assert checkpoints["map_const"].output_payload == ["mock_const_item", "mock_const_item"]
+    assert checkpoints["map_const_side_effect"].output_payload == [
+        "mock_const_side_effect_item",
+        "mock_const_side_effect_item",
+    ]
+    assert checkpoints["map_callable"].output_payload == ["simulated_alpha", "simulated_beta"]
+    assert checkpoints["map_no_mock"].output_payload == ["executed_alpha", "executed_beta"]
+
+
+def test_mapped_sub_step_fault_injection() -> None:
+    """Validate mapped sub-step fault injection matching by parent step name and sub-step name."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step = StepDefinition(
+        name="failing_map",
+        action=lambda item: item * 2,
+        is_mapped=True,
+        map_over="nums",
+    )
+    wf = WorkflowDefinition(
+        name="map_fault_wf",
+        stages=(StageDefinition(name="stg", steps=(step,)),),
+    )
+
+    # Injected by parent step name
+    res1 = engine.run(
+        wf,
+        initial_inputs={"nums": [1, 2]},
+        fault_injection={"failing_map": RuntimeError("injected mapped parent fault")},
+    )
+    assert res1.status == WorkflowStatus.SUSPENDED
+    assert "injected mapped parent fault" in (res1.error_summary or "")
+
+    # Injected by specific sub-step name
+    res2 = engine.run(
+        wf,
+        initial_inputs={"nums": [1, 2]},
+        fault_injection={"failing_map[0]": ValueError("injected sub-step fault")},
+    )
+    assert res2.status == WorkflowStatus.SUSPENDED
+    assert "injected sub-step fault" in (res2.error_summary or "")
