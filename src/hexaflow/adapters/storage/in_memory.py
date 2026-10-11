@@ -101,6 +101,19 @@ class InMemoryStateStore(WorkflowStateStorePort):
             if run_id in self._runs:
                 self._runs[run_id].step_checkpoints.clear()
 
+    def delete_checkpoint(self, run_id: str, step_name: str) -> None:
+        """Delete an individual step checkpoint during rewind operations.
+
+        Args:
+            run_id: Parent workflow execution ID.
+            step_name: Step name whose checkpoint should be removed.
+        """
+        with self._lock:
+            if run_id in self._checkpoints:
+                self._checkpoints[run_id].pop(step_name, None)
+            if run_id in self._runs and step_name in self._runs[run_id].step_checkpoints:
+                del self._runs[run_id].step_checkpoints[step_name]
+
 
 __all__ = [
     "InMemoryStateStore",

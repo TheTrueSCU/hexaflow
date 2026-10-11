@@ -103,6 +103,8 @@ class SqliteStateStore(WorkflowStateStorePort):
             columns = [row["name"] for row in cursor.fetchall()]
             if "initial_inputs" not in columns:
                 conn.execute("ALTER TABLE workflow_runs ADD COLUMN initial_inputs TEXT;")
+            if "is_dry_run" not in columns:
+                conn.execute("ALTER TABLE workflow_runs ADD COLUMN is_dry_run INTEGER DEFAULT 0;")
 
             conn.execute(
                 """
@@ -191,14 +193,15 @@ class SqliteStateStore(WorkflowStateStorePort):
             conn.execute(
                 """
                 INSERT INTO workflow_runs (
-                    run_id, workflow_name, status, current_stage, error_summary, started_at, finished_at, initial_inputs
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    run_id, workflow_name, status, current_stage, error_summary, started_at, finished_at, initial_inputs, is_dry_run
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(run_id) DO UPDATE SET
                     status=excluded.status,
                     current_stage=excluded.current_stage,
                     error_summary=excluded.error_summary,
                     finished_at=excluded.finished_at,
-                    initial_inputs=COALESCE(excluded.initial_inputs, workflow_runs.initial_inputs);
+                    initial_inputs=COALESCE(excluded.initial_inputs, workflow_runs.initial_inputs),
+                    is_dry_run=excluded.is_dry_run;
                 """,
                 (
                     state.run_id,
@@ -211,6 +214,7 @@ class SqliteStateStore(WorkflowStateStorePort):
                     json.dumps(state.initial_inputs, cls=_StateJSONEncoder)
                     if state.initial_inputs is not None
                     else None,
+                    1 if state.is_dry_run else 0,
                 ),
             )
             conn.commit()
@@ -234,6 +238,7 @@ class SqliteStateStore(WorkflowStateStorePort):
             col_names = set(row.keys())
             initial_inputs_raw = row["initial_inputs"] if "initial_inputs" in col_names else None
             initial_inputs = json.loads(initial_inputs_raw) if initial_inputs_raw else {}
+            is_dry_run = bool(row["is_dry_run"]) if "is_dry_run" in col_names else False
 
             return WorkflowExecutionState(
                 run_id=row["run_id"],
@@ -243,6 +248,7 @@ class SqliteStateStore(WorkflowStateStorePort):
                 error_summary=row["error_summary"],
                 step_checkpoints=step_map,
                 initial_inputs=initial_inputs,
+                is_dry_run=is_dry_run,
                 started_at=datetime.fromisoformat(row["started_at"]),
                 finished_at=datetime.fromisoformat(row["finished_at"])
                 if row["finished_at"]
@@ -358,6 +364,42 @@ class SqliteStateStore(WorkflowStateStorePort):
                 and run_artifacts.exists()
             ):
                 shutil.rmtree(run_artifacts, ignore_errors=True)
+
+    def delete_checkpoint(self, run_id: str, step_name: str) -> None:
+        """Delete an individual step checkpoint during rewind operations.
+
+        Args:
+            run_id: Parent workflow execution ID.
+            step_name: Step name whose checkpoint should be removed.
+        """
+        with self._lock:
+            with self._connection() as conn:
+                row = conn.execute(
+                    "SELECT stage_name, input_payload, output_payload FROM step_checkpoints WHERE run_id = ? AND step_name = ?",
+                    (run_id, step_name),
+                ).fetchone()
+
+                conn.execute(
+                    "DELETE FROM step_checkpoints WHERE run_id = ? AND step_name = ?",
+                    (run_id, step_name),
+                )
+                conn.commit()
+
+            if row:
+                for payload_col in ("input_payload", "output_payload"):
+                    val = row[payload_col]
+                    if val:
+                        try:
+                            parsed = json.loads(val)
+                            if isinstance(parsed, dict) and self.SPILLOVER_KEY in parsed:
+                                spill_path = Path(parsed[self.SPILLOVER_KEY]).resolve()
+                                if (
+                                    spill_path.is_relative_to(self._artifacts_dir.resolve())
+                                    and spill_path.exists()
+                                ):
+                                    spill_path.unlink(missing_ok=True)
+                        except Exception:
+                            pass
 
     def _row_to_checkpoint(self, row: sqlite3.Row) -> CheckpointRecord:
         """Convert a database row into a domain CheckpointRecord."""

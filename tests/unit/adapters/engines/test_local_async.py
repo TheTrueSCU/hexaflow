@@ -911,3 +911,179 @@ def test_restart_handles_corrupt_checkpoint_store(monkeypatch) -> None:
     monkeypatch.setattr(store, "get_run", _corrupt_get_run)
     restarted = engine.restart(res.run_id, wf)
     assert restarted.status == WorkflowStatus.COMPLETED
+
+
+def test_dry_run_simulation_safe_and_mocked() -> None:
+    """Validate that dry-run mode executes safe steps and uses mocks for side effects."""
+
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    executed_side_effect = False
+
+    def real_side_effect(ctx: StepContext) -> str:
+        nonlocal executed_side_effect
+        executed_side_effect = True
+        return "real_db_write"
+
+    step_read = StepDefinition(name="read_data", action=lambda ctx: {"items": [1, 2]})
+    step_write = StepDefinition(
+        name="write_db",
+        action=real_side_effect,
+        depends_on=("read_data",),
+        side_effects=True,
+        dry_run="mock_db_result",
+    )
+
+    stage = StageDefinition(name="pipeline", steps=(step_read, step_write))
+    wf = WorkflowDefinition(name="dry_run_wf", stages=(stage,))
+
+    res = engine.run(wf, dry_run=True)
+    assert res.status == WorkflowStatus.COMPLETED
+    assert executed_side_effect is False
+    assert res.step_checkpoints["write_db"].output_payload == "mock_db_result"
+
+
+def test_dry_run_unsafe_step_raises_error() -> None:
+    """Validate that dry-run aborts if a side-effect step lacks dry_run mock without allow_unsafe."""
+
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_unsafe = StepDefinition(
+        name="delete_table",
+        action=lambda ctx: "deleted",
+        side_effects=True,
+        dry_run=None,
+    )
+    stage = StageDefinition(name="stage1", steps=(step_unsafe,))
+    wf = WorkflowDefinition(name="unsafe_wf", stages=(stage,))
+
+    res = engine.run(wf, dry_run=True)
+    assert res.status == WorkflowStatus.SUSPENDED
+    assert "DryRunUnsafeStepError" in (res.error_summary or "")
+
+
+def test_dry_run_allow_unsafe_flag() -> None:
+    """Validate that allow_unsafe=True permits executing side effects in dry-run mode."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    executed = False
+
+    def action_fn(ctx: StepContext) -> str:
+        nonlocal executed
+        executed = True
+        return "executed"
+
+    step = StepDefinition(name="step_unsafe", action=action_fn, side_effects=True, dry_run=None)
+    stage = StageDefinition(name="s", steps=(step,))
+    wf = WorkflowDefinition(name="allow_unsafe_wf", stages=(stage,))
+
+    res = engine.run(wf, dry_run=True, allow_unsafe=True)
+    assert res.status == WorkflowStatus.COMPLETED
+    assert executed is True
+
+
+def test_fault_injection_simulation() -> None:
+    """Validate fault injection triggers synthetic failures during execution."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step1 = StepDefinition(name="s1", action=lambda ctx: "s1_ok")
+    step2 = StepDefinition(name="s2", action=lambda ctx: "s2_ok", depends_on=("s1",))
+    stage = StageDefinition(name="stg", steps=(step1, step2))
+    wf = WorkflowDefinition(name="fault_wf", stages=(stage,))
+
+    injected = RuntimeError("Synthetic chaos failure")
+    res = engine.run(wf, fault_injection={"s1": injected})
+
+    assert res.status == WorkflowStatus.SUSPENDED
+    assert res.step_checkpoints["s1"].status == StepStatus.FAILED
+    assert "Synthetic chaos failure" in (res.error_summary or "")
+
+
+def test_engine_rewind_and_replay() -> None:
+    """Validate engine rewind invalidates target step and downstream dependencies and replays."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_counts: dict[str, int] = {"s1": 0, "s2": 0, "s3": 0}
+
+    def fn1(ctx: StepContext) -> str:
+        step_counts["s1"] += 1
+        return "val_s1"
+
+    def fn2(ctx: StepContext) -> str:
+        step_counts["s2"] += 1
+        return f"{ctx.inputs['s1']}_val_s2"
+
+    def fn3(ctx: StepContext) -> str:
+        step_counts["s3"] += 1
+        return f"{ctx.inputs['s2']}_val_s3"
+
+    s1 = StepDefinition(name="s1", action=fn1)
+    s2 = StepDefinition(name="s2", action=fn2, depends_on=("s1",))
+    s3 = StepDefinition(name="s3", action=fn3, depends_on=("s2",))
+
+    stage = StageDefinition(name="stg", steps=(s1, s2, s3))
+    wf = WorkflowDefinition(name="rewind_test_wf", stages=(stage,))
+
+    initial_res = engine.run(wf)
+    assert initial_res.status == WorkflowStatus.COMPLETED
+    assert step_counts == {"s1": 1, "s2": 1, "s3": 1}
+
+    # Rewind to s2: s1 should remain cached, while s2 and s3 are replayed
+    rewound_res = engine.rewind(initial_res.run_id, wf, to_step="s2")
+    assert rewound_res.status == WorkflowStatus.COMPLETED
+    assert step_counts["s1"] == 1  # Unchanged / skipped
+    assert step_counts["s2"] == 2  # Re-executed
+    assert step_counts["s3"] == 2  # Re-executed downstream
+
+
+def test_mapped_step_simulation_side_effects_and_mock() -> None:
+    """Validate mapped steps observe dry_run, side_effects guards, and mock fallbacks."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    real_executed: list[int] = []
+
+    def mutating_action(item: int) -> int:
+        real_executed.append(item)
+        return item * 10
+
+    mapped_step = StepDefinition(
+        name="process_items",
+        action=mutating_action,
+        is_mapped=True,
+        map_over="items",
+        side_effects=True,
+    )
+    wf_unsafe = WorkflowDefinition(
+        name="mapped_unsafe_wf",
+        stages=(StageDefinition(name="stg", steps=(mapped_step,)),),
+    )
+
+    # In dry-run without mock or allow_unsafe, execution suspends with DryRunUnsafeStepError
+    unsafe_res = engine.run(wf_unsafe, initial_inputs={"items": [1, 2]}, dry_run=True)
+    assert unsafe_res.status == WorkflowStatus.SUSPENDED
+    assert "DryRunUnsafeStepError" in (unsafe_res.error_summary or "")
+    assert real_executed == []
+
+    # With mock fallback
+    mapped_mock = StepDefinition(
+        name="process_items_mocked",
+        action=mutating_action,
+        is_mapped=True,
+        map_over="items",
+        side_effects=True,
+        dry_run=lambda item: item * 99,
+    )
+    wf_mocked = WorkflowDefinition(
+        name="mapped_mocked_wf",
+        stages=(StageDefinition(name="stg", steps=(mapped_mock,)),),
+    )
+    sim_res = engine.run(wf_mocked, initial_inputs={"items": [1, 2]}, dry_run=True)
+    assert sim_res.status == WorkflowStatus.COMPLETED
+    assert real_executed == []  # Real action was not invoked
+    assert sim_res.step_checkpoints["process_items_mocked"].output_payload == [99, 198]

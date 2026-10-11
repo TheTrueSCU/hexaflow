@@ -22,11 +22,13 @@ from uuid import uuid4
 
 from hexaflow.adapters.storage.in_memory import InMemoryStateStore
 from hexaflow.domain.exceptions import (
+    DryRunUnsafeStepError,
     StepNotFoundError,
     WorkflowAborted,
     WorkflowError,
     WorkflowSuspended,
 )
+from hexaflow.domain.graph import WorkflowGraph
 from hexaflow.domain.models import (
     ExecutionPool,
     StageDefinition,
@@ -168,6 +170,9 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         workflow: WorkflowDefinition,
         initial_inputs: dict[str, Any] | None = None,
         skip_steps: set[str] | list[str] | None = None,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> WorkflowExecutionState:
         """Synchronously execute a workflow definition from start to finish.
 
@@ -175,17 +180,32 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             workflow: Immutable specification of the workflow DAG.
             initial_inputs: Optional dictionary of input arguments.
             skip_steps: Optional collection of step names to explicitly skip.
+            dry_run: When True, simulates workflow execution without running side-effecting steps.
+            allow_unsafe: When True in dry_run mode, executes side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
 
         Returns:
             Terminal or suspended WorkflowExecutionState.
         """
-        return asyncio.run(self.run_async(workflow, initial_inputs, skip_steps=skip_steps))
+        return asyncio.run(
+            self.run_async(
+                workflow,
+                initial_inputs,
+                skip_steps=skip_steps,
+                dry_run=dry_run,
+                allow_unsafe=allow_unsafe,
+                fault_injection=fault_injection,
+            )
+        )
 
     async def run_async(
         self,
         workflow: WorkflowDefinition,
         initial_inputs: dict[str, Any] | None = None,
         skip_steps: set[str] | list[str] | None = None,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> WorkflowExecutionState:
         """Asynchronously execute a workflow definition from start to finish.
 
@@ -193,6 +213,9 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             workflow: Immutable specification of the workflow DAG.
             initial_inputs: Optional dictionary of input arguments.
             skip_steps: Optional collection of step names to explicitly skip.
+            dry_run: When True, simulates workflow execution without running side-effecting steps.
+            allow_unsafe: When True in dry_run mode, executes side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
 
         Returns:
             Terminal or suspended WorkflowExecutionState.
@@ -204,10 +227,19 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             workflow_name=workflow.name,
             status=WorkflowStatus.RUNNING,
             initial_inputs=inputs_copy,
+            is_dry_run=dry_run,
         )
         self._store.save_run(state)
         skipped = set(skip_steps or ())
-        return await self._execute_workflow(state, workflow, copy.deepcopy(inputs_copy), skipped)
+        return await self._execute_workflow(
+            state=state,
+            workflow=workflow,
+            inputs=copy.deepcopy(inputs_copy),
+            skipped_steps=skipped,
+            dry_run=dry_run,
+            allow_unsafe=allow_unsafe,
+            fault_injection=fault_injection or {},
+        )
 
     def resume(
         self,
@@ -262,7 +294,89 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         state.error_summary = None
         self._store.save_run(state)
         skipped = set(skip_steps or ())
-        return await self._execute_workflow(state, workflow, merged_inputs, skipped)
+        return await self._execute_workflow(
+            state=state,
+            workflow=workflow,
+            inputs=merged_inputs,
+            skipped_steps=skipped,
+            dry_run=state.is_dry_run,
+        )
+
+    def rewind(
+        self,
+        run_id: str,
+        workflow: WorkflowDefinition,
+        to_step: str,
+        patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
+    ) -> WorkflowExecutionState:
+        """Synchronously rewind execution state to before a step and resume.
+
+        Args:
+            run_id: Execution identifier of the workflow run to rewind.
+            workflow: WorkflowDefinition specification matching the run.
+            to_step: The target step to rewind before.
+            patch_inputs: Optional override inputs for the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip.
+
+        Returns:
+            Updated WorkflowExecutionState outcome following replay.
+        """
+        return asyncio.run(
+            self.rewind_async(
+                run_id=run_id,
+                workflow=workflow,
+                to_step=to_step,
+                patch_inputs=patch_inputs,
+                skip_steps=skip_steps,
+            )
+        )
+
+    async def rewind_async(
+        self,
+        run_id: str,
+        workflow: WorkflowDefinition,
+        to_step: str,
+        patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
+    ) -> WorkflowExecutionState:
+        """Asynchronously rewind execution state to before a step and resume.
+
+        Args:
+            run_id: Execution identifier of the workflow run to rewind.
+            workflow: WorkflowDefinition specification matching the run.
+            to_step: The target step to rewind before.
+            patch_inputs: Optional override inputs for the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip.
+
+        Returns:
+            Updated WorkflowExecutionState outcome following replay.
+        """
+        state = self._store.get_run(run_id)
+        if not state:
+            raise WorkflowSuspended(
+                run_id, "unknown", f"Workflow run '{run_id}' not found in state store."
+            )
+
+        graph = WorkflowGraph.from_workflow(workflow)
+        downstream = graph.descendants(to_step)
+        purged = state.rewind_to(to_step, downstream)
+
+        for s in purged:
+            self._store.delete_checkpoint(run_id, s)
+
+        merged_inputs = {**state.initial_inputs, **(patch_inputs or {})}
+        state.status = WorkflowStatus.RUNNING
+        state.error_summary = None
+        self._store.save_run(state)
+        skipped = set(skip_steps or ())
+        return await self._execute_workflow(
+            state=state,
+            workflow=workflow,
+            inputs=merged_inputs,
+            skipped_steps=skipped,
+            dry_run=state.is_dry_run,
+        )
 
     def restart(
         self,
@@ -377,10 +491,14 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         workflow: WorkflowDefinition,
         inputs: dict[str, Any],
         skipped_steps: set[str] | None = None,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> WorkflowExecutionState:
         """Internal execution loop advancing stages and evaluating DAG dependencies."""
         cached_outputs: dict[str, Any] = {}
         active_skips = set(skipped_steps or ())
+        faults = fault_injection or {}
 
         # Re-populate cached outputs from already completed checkpoints (resumption path)
         existing_checkpoints = self._store.get_checkpoints(state.run_id)
@@ -397,7 +515,15 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
 
             try:
                 await self._execute_stage(
-                    state, stage, workflow, cached_outputs, inputs, active_skips
+                    state=state,
+                    stage=stage,
+                    workflow=workflow,
+                    cached_outputs=cached_outputs,
+                    initial_inputs=inputs,
+                    skipped_steps=active_skips,
+                    dry_run=dry_run,
+                    allow_unsafe=allow_unsafe,
+                    fault_injection=faults,
                 )
             except WorkflowSuspended as suspended_err:
                 state.status = WorkflowStatus.SUSPENDED
@@ -418,12 +544,24 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         cached_outputs: dict[str, Any],
         initial_inputs: dict[str, Any],
         skipped_steps: set[str],
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> None:
         """Execute all steps within a single stage according to its execution mode."""
+        faults = fault_injection or {}
         if stage.execution_mode == StageExecutionMode.SEQUENTIAL:
             for step in stage.steps:
                 res = await self._execute_step(
-                    state, stage, step, cached_outputs, initial_inputs, skipped_steps
+                    state=state,
+                    stage=stage,
+                    step=step,
+                    cached_outputs=cached_outputs,
+                    initial_inputs=initial_inputs,
+                    skipped_steps=skipped_steps,
+                    dry_run=dry_run,
+                    allow_unsafe=allow_unsafe,
+                    fault_injection=faults,
                 )
                 cached_outputs[step.name] = res
         else:
@@ -431,7 +569,15 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             async def _run_wrapped(step_def: StepDefinition) -> tuple[bool, Any]:
                 try:
                     val = await self._execute_step(
-                        state, stage, step_def, cached_outputs, initial_inputs, skipped_steps
+                        state=state,
+                        stage=stage,
+                        step=step_def,
+                        cached_outputs=cached_outputs,
+                        initial_inputs=initial_inputs,
+                        skipped_steps=skipped_steps,
+                        dry_run=dry_run,
+                        allow_unsafe=allow_unsafe,
+                        fault_injection=faults,
                     )
                     return True, val
                 except Exception as exc:
@@ -449,6 +595,51 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             if first_err is not None:
                 raise first_err
 
+    async def _invoke_step_action(
+        self,
+        step: StepDefinition,
+        ctx: StepContext,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
+    ) -> Any:
+        """Execute step action or simulated dry_run mock callable."""
+        faults = fault_injection or {}
+        if step.name in faults:
+            raise faults[step.name]
+
+        if not dry_run:
+            if step.timeout_seconds:
+                return await asyncio.wait_for(
+                    self._invoke_callable(step.action, ctx, pool=step.pool),
+                    timeout=step.timeout_seconds,
+                )
+            return await self._invoke_callable(step.action, ctx, pool=step.pool)
+
+        # Dry-run execution path
+        if step.side_effects and not allow_unsafe:
+            if step.dry_run is None:
+                raise DryRunUnsafeStepError(
+                    f"Step '{step.name}' has side effects (side_effects=True) "
+                    "and cannot be executed during dry-run simulation without "
+                    "a mock fallback (dry_run=...) or allow_unsafe=True."
+                )
+            if callable(step.dry_run):
+                return await self._invoke_callable(step.dry_run, ctx, pool=ExecutionPool.ASYNC)
+            return step.dry_run
+
+        if step.dry_run is not None:
+            if callable(step.dry_run):
+                return await self._invoke_callable(step.dry_run, ctx, pool=ExecutionPool.ASYNC)
+            return step.dry_run
+
+        if step.timeout_seconds:
+            return await asyncio.wait_for(
+                self._invoke_callable(step.action, ctx, pool=step.pool),
+                timeout=step.timeout_seconds,
+            )
+        return await self._invoke_callable(step.action, ctx, pool=step.pool)
+
     async def _execute_step(
         self,
         state: WorkflowExecutionState,
@@ -457,6 +648,9 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         cached_outputs: dict[str, Any],
         initial_inputs: dict[str, Any],
         skipped_steps: set[str],
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> Any:
         """Execute an individual step with checkpoint caching, barrier check, and retries."""
         # 1. Resumption Check: If step is already COMPLETED or SKIPPED, return cached output
@@ -524,12 +718,19 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         # 4.5. Dynamic Step Mapping Fan-out
         if step.is_mapped:
             return await self._execute_mapped_step(
-                state, stage, step, cached_outputs, initial_inputs, step_inputs
+                state=state,
+                stage=stage,
+                step=step,
+                cached_outputs=cached_outputs,
+                initial_inputs=initial_inputs,
+                step_inputs=step_inputs,
+                dry_run=dry_run,
+                allow_unsafe=allow_unsafe,
+                fault_injection=fault_injection,
             )
 
         # 5. Execution & Transient Retry Loop
         attempt = 1
-
         policy = step.retry_policy
         start_time = datetime.now(UTC)
 
@@ -543,13 +744,13 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             )
 
             try:
-                if step.timeout_seconds:
-                    res = await asyncio.wait_for(
-                        self._invoke_callable(step.action, ctx, pool=step.pool),
-                        timeout=step.timeout_seconds,
-                    )
-                else:
-                    res = await self._invoke_callable(step.action, ctx, pool=step.pool)
+                res = await self._invoke_step_action(
+                    step=step,
+                    ctx=ctx,
+                    dry_run=dry_run,
+                    allow_unsafe=allow_unsafe,
+                    fault_injection=fault_injection,
+                )
 
                 end_time = datetime.now(UTC)
                 chk = CheckpointRecord(
@@ -646,6 +847,9 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         cached_outputs: dict[str, Any],
         initial_inputs: dict[str, Any],
         step_inputs: dict[str, Any],
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> list[Any]:
         """Execute a dynamically mapped step fanning out across a runtime iterable.
 
@@ -656,6 +860,9 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             cached_outputs: Current map of evaluated step outputs.
             initial_inputs: Root inputs passed to workflow execution.
             step_inputs: Resolved inputs for this step including upstream dependencies.
+            dry_run: When True, simulates workflow execution.
+            allow_unsafe: When True in dry_run mode, executes side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
 
         Returns:
             Ordered list of outputs from all executed mapped sub-steps.
@@ -721,10 +928,26 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             if sem:
                 async with sem:
                     return await self._execute_mapped_sub_step(
-                        state, stage, step, step_inputs, idx, item_val
+                        state=state,
+                        stage=stage,
+                        step=step,
+                        step_inputs=step_inputs,
+                        idx=idx,
+                        item=item_val,
+                        dry_run=dry_run,
+                        allow_unsafe=allow_unsafe,
+                        fault_injection=fault_injection,
                     )
             return await self._execute_mapped_sub_step(
-                state, stage, step, step_inputs, idx, item_val
+                state=state,
+                stage=stage,
+                step=step,
+                step_inputs=step_inputs,
+                idx=idx,
+                item=item_val,
+                dry_run=dry_run,
+                allow_unsafe=allow_unsafe,
+                fault_injection=fault_injection,
             )
 
         tasks = [_run_item(i, val) for i, val in enumerate(items)]
@@ -747,6 +970,57 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         state.step_checkpoints[step.name] = chk
         return list(results)
 
+    async def _invoke_mapped_sub_step(
+        self,
+        step: StepDefinition,
+        item: Any,
+        ctx: StepContext,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
+    ) -> Any:
+        """Execute or simulate mapped sub-step action."""
+        faults = fault_injection or {}
+        if ctx.step_name in faults:
+            raise faults[ctx.step_name]
+        if step.name in faults:
+            raise faults[step.name]
+
+        if not dry_run:
+            if step.timeout_seconds:
+                return await asyncio.wait_for(
+                    self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool),
+                    timeout=step.timeout_seconds,
+                )
+            return await self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool)
+
+        if step.side_effects and not allow_unsafe:
+            if step.dry_run is None:
+                raise DryRunUnsafeStepError(
+                    f"Mapped step '{step.name}' has side effects (side_effects=True) "
+                    "and cannot be executed during dry-run simulation without "
+                    "a mock fallback (dry_run=...) or allow_unsafe=True."
+                )
+            if callable(step.dry_run):
+                return await self._invoke_mapped_callable(
+                    step.dry_run, item, ctx, pool=ExecutionPool.ASYNC
+                )
+            return step.dry_run
+
+        if step.dry_run is not None:
+            if callable(step.dry_run):
+                return await self._invoke_mapped_callable(
+                    step.dry_run, item, ctx, pool=ExecutionPool.ASYNC
+                )
+            return step.dry_run
+
+        if step.timeout_seconds:
+            return await asyncio.wait_for(
+                self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool),
+                timeout=step.timeout_seconds,
+            )
+        return await self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool)
+
     async def _execute_mapped_sub_step(
         self,
         state: WorkflowExecutionState,
@@ -755,6 +1029,9 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         step_inputs: dict[str, Any],
         idx: int,
         item: Any,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> Any:
         """Execute an individual sub-step of a mapped fan-out with retries and checkpoints.
 
@@ -765,6 +1042,9 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             step_inputs: Shared inputs dictionary.
             idx: Index of this item in the mapped collection.
             item: The runtime value being processed.
+            dry_run: When True, simulates sub-step execution.
+            allow_unsafe: When True in dry_run mode, executes side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
 
         Returns:
             The output of the sub-step execution.
@@ -800,13 +1080,14 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             )
 
             try:
-                if step.timeout_seconds:
-                    res = await asyncio.wait_for(
-                        self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool),
-                        timeout=step.timeout_seconds,
-                    )
-                else:
-                    res = await self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool)
+                res = await self._invoke_mapped_sub_step(
+                    step=step,
+                    item=item,
+                    ctx=ctx,
+                    dry_run=dry_run,
+                    allow_unsafe=allow_unsafe,
+                    fault_injection=fault_injection,
+                )
 
                 end_time = datetime.now(UTC)
                 chk = CheckpointRecord(

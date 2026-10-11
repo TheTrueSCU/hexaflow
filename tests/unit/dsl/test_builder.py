@@ -260,3 +260,92 @@ def test_dsl_bind_store_invalid_engine() -> None:
     wf = Workflow("dummy_wf", engine=engine)
     with pytest.raises(TypeError, match="does not support binding a state store"):
         wf.bind_store(InMemoryStateStore())
+
+
+def test_workflow_dsl_graph_and_renderers() -> None:
+    """Validate to_graph, to_dot, render, and render_image via Workflow builder."""
+    wf = Workflow("graph_dsl_wf")
+
+    @wf.step("extract", estimated_duration_seconds=2.5)
+    def extract(ctx):
+        return [1, 2, 3]
+
+    @wf.step("transform", depends_on=["extract"], side_effects=True, estimated_duration_seconds=5.0)
+    def transform(ctx):
+        return [x * 2 for x in ctx.get("extract")]
+
+    graph = wf.to_graph()
+    assert graph.workflow_name == "graph_dsl_wf"
+    assert len(graph.nodes) == 2
+
+    # Test DOT rendering
+    dot_out = wf.to_dot()
+    assert 'digraph "graph_dsl_wf"' in dot_out
+
+    # Test generic render
+    mermaid_out = wf.render("mermaid")
+    assert "flowchart TD" in mermaid_out
+
+    json_out = wf.render("json")
+    assert '"workflow_id": "graph_dsl_wf"' in json_out
+
+    # Test image rendering (ascii fallback provides svg)
+    svg_bytes = wf.render_image("ascii", "svg")
+    assert svg_bytes.startswith(b"<svg")
+
+
+def test_workflow_dsl_simulate_and_fault_injection() -> None:
+    """Validate wf.simulate() and async simulate with mock and fault injection."""
+    wf = Workflow("sim_wf")
+
+    executed_side_effect = False
+
+    @wf.step("query_records")
+    def query_records(ctx):
+        return {"users": ["alice", "bob"]}
+
+    @wf.step(
+        "notify_users", depends_on=["query_records"], side_effects=True, dry_run={"delivered": 2}
+    )
+    def notify_users(ctx):
+        nonlocal executed_side_effect
+        executed_side_effect = True
+        return {"delivered": 100}
+
+    # Run simulation
+    sim_state = wf.simulate()
+    assert sim_state.status == WorkflowStatus.COMPLETED
+    assert executed_side_effect is False
+    assert sim_state.step_checkpoints["notify_users"].output_payload == {"delivered": 2}
+
+    # Test simulate with fault injection
+    fault_state = wf.simulate(fault_injection={"query_records": TimeoutError("Simulated timeout")})
+    assert fault_state.status == WorkflowStatus.SUSPENDED
+    assert fault_state.step_checkpoints["query_records"].status == StepStatus.FAILED
+
+
+def test_workflow_dsl_rewind() -> None:
+    """Validate wf.rewind() from the fluent Workflow builder."""
+    store = InMemoryStateStore()
+    wf = Workflow("rewind_dsl_wf", state_store=store)
+
+    counts = {"a": 0, "b": 0}
+
+    @wf.step("step_a")
+    def step_a(ctx):
+        counts["a"] += 1
+        return 10
+
+    @wf.step("step_b", depends_on=["step_a"])
+    def step_b(ctx):
+        counts["b"] += 1
+        return ctx.inputs["step_a"] + 20
+
+    res1 = wf.run()
+    assert res1.status == WorkflowStatus.COMPLETED
+    assert counts == {"a": 1, "b": 1}
+
+    # Rewind step_b
+    res2 = wf.rewind(res1.run_id, to_step="step_b")
+    assert res2.status == WorkflowStatus.COMPLETED
+    assert counts == {"a": 1, "b": 2}

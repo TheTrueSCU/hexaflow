@@ -219,3 +219,39 @@ def test_sqlite_clear_checkpoints_path_traversal_safe(tmp_path: Path) -> None:
     # Attempt path traversal
     store.clear_checkpoints("../../important_dir")
     assert (outside_dir / "keep.txt").exists() is True
+
+
+def test_sqlite_delete_checkpoint(tmp_path: Path) -> None:
+    """Validate delete_checkpoint deletes the specified step checkpoint and unlinks spillover files."""
+    db_file = tmp_path / "del_test.db"
+    artifacts = tmp_path / "artifacts"
+    store = SqliteStateStore(db_path=db_file, artifacts_dir=artifacts, spillover_threshold_bytes=10)
+    run_id = "run-del-1"
+
+    chk_1 = CheckpointRecord(
+        run_id=run_id,
+        stage_name="stg",
+        step_name="step_a",
+        status=StepStatus.COMPLETED,
+        output_payload={"huge": "a" * 50},
+    )
+    chk_2 = CheckpointRecord(
+        run_id=run_id,
+        stage_name="stg",
+        step_name="step_b",
+        status=StepStatus.COMPLETED,
+        output_payload={"huge": "b" * 50},
+    )
+    store.save_checkpoint(chk_1)
+    store.save_checkpoint(chk_2)
+
+    spill_a = artifacts / run_id / "stg" / "step_a_output.bin"
+    spill_b = artifacts / run_id / "stg" / "step_b_output.bin"
+    assert spill_a.exists() is True
+    assert spill_b.exists() is True
+
+    store.delete_checkpoint(run_id, "step_a")
+    assert store.get_checkpoint(run_id, "step_a") is None
+    assert store.get_checkpoint(run_id, "step_b") is not None
+    assert spill_a.exists() is False
+    assert spill_b.exists() is True
