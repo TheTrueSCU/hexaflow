@@ -13,5 +13,6 @@ from hexaflow.ports.engine import WorkflowEnginePort
 
 def test_cannot_instantiate_abstract_engine_port() -> None:
     """Validate that direct instantiation of WorkflowEnginePort raises TypeError."""
-    with pytest.raises(TypeError):
-        WorkflowEnginePort()  # type: ignore[abstract]
+    port_cls: type[WorkflowEnginePort] = WorkflowEnginePort
+    with pytest.raises(TypeError, match="Can't instantiate abstract class"):
+        port_cls.__new__(port_cls)
