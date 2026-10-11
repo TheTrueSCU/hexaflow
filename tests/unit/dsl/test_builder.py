@@ -396,3 +396,16 @@ def test_workflow_dsl_middleware_unsupported_engine() -> None:
         wf.use(mw)
 
     assert wf.middleware == []
+
+
+def test_workflow_dsl_custom_engine_constructor_middleware() -> None:
+    """Validate that passing engine and middleware in Workflow constructor forwards to engine.use()."""
+    from unittest.mock import MagicMock
+
+    from hexaflow.adapters.middleware.timing import TimingStepMiddleware
+
+    mock_engine = MagicMock()
+    mw = TimingStepMiddleware()
+    wf = Workflow("custom_engine_wf", engine=mock_engine, middleware=[mw])
+    assert wf.name == "custom_engine_wf"
+    mock_engine.use.assert_called_once_with(mw)

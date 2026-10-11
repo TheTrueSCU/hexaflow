@@ -1090,6 +1090,22 @@ def test_mapped_step_simulation_side_effects_and_mock() -> None:
     assert real_executed == []  # Real action was not invoked
     assert sim_res.step_checkpoints["process_items_mocked"].output_payload == [99, 198]
 
+    # With static value dry_run
+    mapped_static = StepDefinition(
+        name="process_items_static",
+        action=mutating_action,
+        is_mapped=True,
+        map_over="items",
+        dry_run=42,
+    )
+    wf_static = WorkflowDefinition(
+        name="mapped_static_wf",
+        stages=(StageDefinition(name="stg", steps=(mapped_static,)),),
+    )
+    static_res = engine.run(wf_static, initial_inputs={"items": [1, 2]}, dry_run=True)
+    assert static_res.status == WorkflowStatus.COMPLETED
+    assert static_res.step_checkpoints["process_items_static"].output_payload == [42, 42]
+
 
 def test_engine_middleware_onion_order_and_hooks() -> None:
     """Validate that engine runs multiple middlewares in nested onion order."""
