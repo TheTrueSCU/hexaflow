@@ -286,3 +286,43 @@ jobs:
     assert res.exit_code == 0
     assert "Total Steps (Nodes)" in res.stdout
     assert "Total Dependencies (Edges)" in res.stdout
+
+
+def test_cli_graph_render_invalid_params_json(tmp_path: Path) -> None:
+    yaml_file = tmp_path / "ci.yml"
+    yaml_file.write_text("name: CI\njobs:\n  a: {}\n", encoding="utf-8")
+    res = runner.invoke(app, ["graph", "render", str(yaml_file), "--params", "not_valid_json"])
+    assert res.exit_code != 0
+
+    res_not_dict = runner.invoke(app, ["graph", "render", str(yaml_file), "--params", "[1, 2]"])
+    assert res_not_dict.exit_code != 0
+
+
+def test_cli_graph_render_critical_path(tmp_path: Path) -> None:
+    yaml_file = tmp_path / "ci.yml"
+    yaml_file.write_text("name: CI\njobs:\n  a: {}\n  b: {needs: a}\n", encoding="utf-8")
+    res = runner.invoke(app, ["graph", "render", str(yaml_file), "--critical-path"])
+    assert res.exit_code == 0
+    assert "a --> b" in res.stdout
+
+
+def test_cli_graph_info_with_params(tmp_path: Path) -> None:
+    pipeline_file = tmp_path / "factory.py"
+    pipeline_file.write_text(
+        """
+from hexaflow import Workflow
+
+def make_flow(step_name="default_step"):
+    wf = Workflow("param_wf")
+    @wf.step(step_name)
+    def s(ctx): return "ok"
+    return wf
+""",
+        encoding="utf-8",
+    )
+    res = runner.invoke(
+        app,
+        ["graph", "info", f"{pipeline_file}:make_flow", "--params", '{"step_name": "custom"}'],
+    )
+    assert res.exit_code == 0
+    assert "Workflow Topological Graph: param_wf" in res.stdout

@@ -74,3 +74,13 @@ def test_load_github_actions_invalid_yaml() -> None:
 def test_load_github_actions_missing_jobs() -> None:
     with pytest.raises(ValueError, match="missing or empty 'jobs'"):
         load_github_actions_workflow("name: No Jobs Workflow\non: push\n")
+
+
+def test_load_github_actions_directory_path(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="not a regular file"):
+        load_github_actions_workflow(tmp_path)
+
+
+def test_load_github_actions_non_dict_root() -> None:
+    with pytest.raises(ValueError, match="root must be a YAML mapping"):
+        load_github_actions_workflow("- item1\n- item2\n")
