@@ -66,3 +66,28 @@ def test_in_memory_checkpoints_lifecycle() -> None:
     store.clear_checkpoints(run_id)
     cleared_chks = store.get_checkpoints(run_id)
     assert len(cleared_chks) == 0
+
+
+def test_in_memory_delete_checkpoint() -> None:
+    """Validate delete_checkpoint removes only the specified step checkpoint."""
+    store = InMemoryStateStore()
+    run_id = "run-200"
+
+    chk_1 = CheckpointRecord(
+        run_id=run_id,
+        stage_name="stg",
+        step_name="s1",
+        status=StepStatus.COMPLETED,
+    )
+    chk_2 = CheckpointRecord(
+        run_id=run_id,
+        stage_name="stg",
+        step_name="s2",
+        status=StepStatus.COMPLETED,
+    )
+    store.save_checkpoint(chk_1)
+    store.save_checkpoint(chk_2)
+
+    store.delete_checkpoint(run_id, "s1")
+    assert store.get_checkpoint(run_id, "s1") is None
+    assert store.get_checkpoint(run_id, "s2") is not None

@@ -140,11 +140,116 @@ class WorkflowExecutionState(BaseModel):
     )
     finished_at: datetime | None = Field(default=None, description="Run terminal timestamp.")
 
+    def to_memento(self) -> "WorkflowMemento":
+        """Capture an immutable point-in-time snapshot memento of this execution state.
+
+        Returns:
+            WorkflowMemento capturing the current status, checkpoints, and stage.
+        """
+        import copy
+
+        return WorkflowMemento(
+            run_id=self.run_id,
+            workflow_name=self.workflow_name,
+            status=self.status,
+            current_stage=self.current_stage,
+            step_checkpoints=copy.deepcopy(self.step_checkpoints),
+            initial_inputs=copy.deepcopy(self.initial_inputs),
+            error_summary=self.error_summary,
+            created_at=datetime.now(UTC),
+        )
+
+    def restore_from_memento(self, memento: "WorkflowMemento") -> None:
+        """Restore this execution state from a previous snapshot memento.
+
+        Args:
+            memento: The WorkflowMemento snapshot to restore.
+
+        Raises:
+            ValueError: If memento run_id does not match this state's run_id.
+        """
+        import copy
+
+        if memento.run_id != self.run_id:
+            raise ValueError(
+                f"Cannot restore memento with run_id '{memento.run_id}' onto state with run_id '{self.run_id}'."
+            )
+
+        self.status = memento.status
+        self.current_stage = memento.current_stage
+        self.step_checkpoints = copy.deepcopy(memento.step_checkpoints)
+        self.initial_inputs = copy.deepcopy(memento.initial_inputs)
+        self.error_summary = memento.error_summary
+
+    def rewind_to(
+        self, step_name: str, downstream_steps: set[str] | list[str] | None = None
+    ) -> set[str]:
+        """Rewind workflow execution state to before a specific step.
+
+        Invalidates and purges the checkpoint for `step_name` and all its transitive
+        `downstream_steps`, setting the workflow status back to SUSPENDED or RUNNING.
+
+        Args:
+            step_name: The target step to rewind before.
+            downstream_steps: Transitive downstream dependent step names to invalidate.
+                If None, only `step_name` is purged.
+
+        Returns:
+            Set of all step names whose checkpoints were cleared.
+
+        Notes/Architectural Intent:
+            Enables time-travel workflow debugging and partial replay without requiring
+            a full workflow restart from stage 0.
+        """
+        purged: set[str] = set()
+        steps_to_clear = {step_name} | set(downstream_steps or ())
+
+        for s in steps_to_clear:
+            if s in self.step_checkpoints:
+                del self.step_checkpoints[s]
+                purged.add(s)
+
+        if self.status in (WorkflowStatus.COMPLETED, WorkflowStatus.CANCELLED):
+            self.status = WorkflowStatus.SUSPENDED
+        self.finished_at = None
+        return purged
+
+
+class WorkflowMemento(BaseModel):
+    """Immutable point-in-time snapshot of workflow execution state.
+
+    Notes/Architectural Intent:
+        Implements the Gang of Four Memento pattern for workflow state.
+        Allows capturing snapshots before milestones and restoring or time-traveling
+        back without violating encapsulation.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    run_id: str = Field(description="Unique workflow run identifier.")
+    workflow_name: str = Field(description="Name of the workflow definition.")
+    status: WorkflowStatus = Field(description="Status of workflow at capture time.")
+    current_stage: str | None = Field(default=None, description="Active stage at capture time.")
+    step_checkpoints: dict[str, CheckpointRecord] = Field(
+        default_factory=dict,
+        description="Immutable snapshot mapping of step_name to CheckpointRecord.",
+    )
+    initial_inputs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Initial inputs supplied to run.",
+    )
+    error_summary: str | None = Field(default=None, description="Error summary at capture time.")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp when memento was created.",
+    )
+
 
 __all__ = [
     "CheckpointRecord",
     "StepContext",
     "StepStatus",
     "WorkflowExecutionState",
+    "WorkflowMemento",
     "WorkflowStatus",
 ]

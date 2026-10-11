@@ -219,3 +219,29 @@ def test_sqlite_clear_checkpoints_path_traversal_safe(tmp_path: Path) -> None:
     # Attempt path traversal
     store.clear_checkpoints("../../important_dir")
     assert (outside_dir / "keep.txt").exists() is True
+
+
+def test_sqlite_delete_checkpoint(tmp_path: Path) -> None:
+    """Validate delete_checkpoint deletes only the specified step checkpoint in SQLite."""
+    db_file = tmp_path / "del_test.db"
+    store = SqliteStateStore(db_path=db_file)
+    run_id = "run-del-1"
+
+    chk_1 = CheckpointRecord(
+        run_id=run_id,
+        stage_name="stg",
+        step_name="step_a",
+        status=StepStatus.COMPLETED,
+    )
+    chk_2 = CheckpointRecord(
+        run_id=run_id,
+        stage_name="stg",
+        step_name="step_b",
+        status=StepStatus.COMPLETED,
+    )
+    store.save_checkpoint(chk_1)
+    store.save_checkpoint(chk_2)
+
+    store.delete_checkpoint(run_id, "step_a")
+    assert store.get_checkpoint(run_id, "step_a") is None
+    assert store.get_checkpoint(run_id, "step_b") is not None

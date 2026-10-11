@@ -37,6 +37,7 @@ from hexaflow.domain.state import (
     StepContext,
     StepStatus,
     WorkflowExecutionState,
+    WorkflowMemento,
     WorkflowStatus,
 )
 
@@ -63,6 +64,7 @@ __all__ = [
     "WorkflowError",
     "WorkflowExecutionState",
     "WorkflowGraph",
+    "WorkflowMemento",
     "WorkflowStatus",
     "WorkflowSuspended",
 ]

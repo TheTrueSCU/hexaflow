@@ -606,6 +606,60 @@ class Workflow:
             run_id, definition, patch_inputs, skip_steps=skip_steps
         )
 
+    def rewind(
+        self,
+        run_id: str,
+        to_step: str,
+        patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
+    ) -> WorkflowExecutionState:
+        """Synchronously rewind execution state to before a step and resume.
+
+        Args:
+            run_id: Execution identifier of the workflow run to rewind.
+            to_step: The target step to rewind before.
+            patch_inputs: Optional override inputs for the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip.
+
+        Returns:
+            Updated WorkflowExecutionState outcome following replay.
+        """
+        definition = self.to_definition()
+        return self._engine.rewind(
+            run_id=run_id,
+            workflow=definition,
+            to_step=to_step,
+            patch_inputs=patch_inputs,
+            skip_steps=skip_steps,
+        )
+
+    async def rewind_async(
+        self,
+        run_id: str,
+        to_step: str,
+        patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
+    ) -> WorkflowExecutionState:
+        """Asynchronously rewind execution state to before a step and resume.
+
+        Args:
+            run_id: Execution identifier of the workflow run to rewind.
+            to_step: The target step to rewind before.
+            patch_inputs: Optional override inputs for the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip.
+
+        Returns:
+            Updated WorkflowExecutionState outcome following replay.
+        """
+        definition = self.to_definition()
+        return await self._engine.rewind_async(
+            run_id=run_id,
+            workflow=definition,
+            to_step=to_step,
+            patch_inputs=patch_inputs,
+            skip_steps=skip_steps,
+        )
+
     def restart(self, run_id: str) -> WorkflowExecutionState:
         """Synchronously restart a workflow execution run from the beginning.
 

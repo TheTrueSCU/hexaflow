@@ -1001,3 +1001,41 @@ def test_fault_injection_simulation() -> None:
     assert res.status == WorkflowStatus.SUSPENDED
     assert res.step_checkpoints["s1"].status == StepStatus.FAILED
     assert "Synthetic chaos failure" in (res.error_summary or "")
+
+
+def test_engine_rewind_and_replay() -> None:
+    """Validate engine rewind invalidates target step and downstream dependencies and replays."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    step_counts: dict[str, int] = {"s1": 0, "s2": 0, "s3": 0}
+
+    def fn1(ctx: StepContext) -> str:
+        step_counts["s1"] += 1
+        return "val_s1"
+
+    def fn2(ctx: StepContext) -> str:
+        step_counts["s2"] += 1
+        return f"{ctx.inputs['s1']}_val_s2"
+
+    def fn3(ctx: StepContext) -> str:
+        step_counts["s3"] += 1
+        return f"{ctx.inputs['s2']}_val_s3"
+
+    s1 = StepDefinition(name="s1", action=fn1)
+    s2 = StepDefinition(name="s2", action=fn2, depends_on=("s1",))
+    s3 = StepDefinition(name="s3", action=fn3, depends_on=("s2",))
+
+    stage = StageDefinition(name="stg", steps=(s1, s2, s3))
+    wf = WorkflowDefinition(name="rewind_test_wf", stages=(stage,))
+
+    initial_res = engine.run(wf)
+    assert initial_res.status == WorkflowStatus.COMPLETED
+    assert step_counts == {"s1": 1, "s2": 1, "s3": 1}
+
+    # Rewind to s2: s1 should remain cached, while s2 and s3 are replayed
+    rewound_res = engine.rewind(initial_res.run_id, wf, to_step="s2")
+    assert rewound_res.status == WorkflowStatus.COMPLETED
+    assert step_counts["s1"] == 1  # Unchanged / skipped
+    assert step_counts["s2"] == 2  # Re-executed
+    assert step_counts["s3"] == 2  # Re-executed downstream

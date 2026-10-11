@@ -322,3 +322,30 @@ def test_workflow_dsl_simulate_and_fault_injection() -> None:
     fault_state = wf.simulate(fault_injection={"query_records": TimeoutError("Simulated timeout")})
     assert fault_state.status == WorkflowStatus.SUSPENDED
     assert fault_state.step_checkpoints["query_records"].status == StepStatus.FAILED
+
+
+def test_workflow_dsl_rewind() -> None:
+    """Validate wf.rewind() from the fluent Workflow builder."""
+    store = InMemoryStateStore()
+    wf = Workflow("rewind_dsl_wf", state_store=store)
+
+    counts = {"a": 0, "b": 0}
+
+    @wf.step("step_a")
+    def step_a(ctx):
+        counts["a"] += 1
+        return 10
+
+    @wf.step("step_b", depends_on=["step_a"])
+    def step_b(ctx):
+        counts["b"] += 1
+        return ctx.inputs["step_a"] + 20
+
+    res1 = wf.run()
+    assert res1.status == WorkflowStatus.COMPLETED
+    assert counts == {"a": 1, "b": 1}
+
+    # Rewind step_b
+    res2 = wf.rewind(res1.run_id, to_step="step_b")
+    assert res2.status == WorkflowStatus.COMPLETED
+    assert counts == {"a": 1, "b": 2}

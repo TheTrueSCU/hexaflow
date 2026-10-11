@@ -359,6 +359,20 @@ class SqliteStateStore(WorkflowStateStorePort):
             ):
                 shutil.rmtree(run_artifacts, ignore_errors=True)
 
+    def delete_checkpoint(self, run_id: str, step_name: str) -> None:
+        """Delete an individual step checkpoint during rewind operations.
+
+        Args:
+            run_id: Parent workflow execution ID.
+            step_name: Step name whose checkpoint should be removed.
+        """
+        with self._lock, self._connection() as conn:
+            conn.execute(
+                "DELETE FROM step_checkpoints WHERE run_id = ? AND step_name = ?",
+                (run_id, step_name),
+            )
+            conn.commit()
+
     def _row_to_checkpoint(self, row: sqlite3.Row) -> CheckpointRecord:
         """Convert a database row into a domain CheckpointRecord."""
         return CheckpointRecord(
