@@ -37,13 +37,10 @@ Usage: hexaflow [OPTIONS] COMMAND [ARGS]...
 │ --help          Show this message and exit.                                  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│ status   Display the execution status, stages, and step checkpoints of a     │
-│          workflow run.                                                       │
-│ inspect  Inspect input and output payloads or error tracebacks for a         │
-│          specific step.                                                      │
+│ status   Display execution status, stages, and step checkpoints.             │
+│ inspect  Inspect payloads or error tracebacks for a step.                    │
 │ run      Execute a workflow definition locally.                              │
-│ resume   Resume a suspended workflow from its latest checkpoints without     │
-│          re-running completed steps.                                         │
+│ resume   Resume suspended workflow from latest checkpoints.                  │
 │ restart  Restart a workflow execution run from the beginning.                │
 │ abort    Abort an active or suspended workflow, unwinding any step           │
 │          compensations.                                                      │
@@ -86,18 +83,7 @@ Usage: hexaflow graph [OPTIONS] COMMAND [ARGS]...
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
 │ render  Render a workflow dependency graph to Mermaid, DOT, ASCII, or JSON.  │
-│ info    Display topological metrics, stage distribution, and critical path   │
-│         for a workflow.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-#### `hexaflow graph for`
-
-```text
-Usage: hexaflow graph [OPTIONS] COMMAND [ARGS]...
-Try 'hexaflow graph --help' for help.
-╭─ Error ──────────────────────────────────────────────────────────────────────╮
-│ No such command 'for'.                                                       │
+│ info    Display topological metrics and critical path.                       │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -106,8 +92,7 @@ Try 'hexaflow graph --help' for help.
 ```text
 Usage: hexaflow graph info [OPTIONS] {target}
 
- Display topological metrics, stage distribution, and critical path for a
- workflow.
+ Display topological metrics and critical path.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────╮
 │ *    target      <str>  Workflow target (e.g. 'pipeline.py:wf',              │
@@ -158,7 +143,7 @@ Usage: hexaflow graph render [OPTIONS] {target}
 ```text
 Usage: hexaflow inspect [OPTIONS] {run_id} {step_name}
 
- Inspect input and output payloads or error tracebacks for a specific step.
+ Inspect payloads or error tracebacks for a step.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────╮
 │ *    run_id         <str>  Workflow execution run ID. [required]             │
@@ -168,16 +153,6 @@ Usage: hexaflow inspect [OPTIONS] {run_id} {step_name}
 │ --db          <str>  Path to SQLite state database.                          │
 │                      [default: .hexaflow/state.db]                           │
 │ --help               Show this message and exit.                             │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `hexaflow re-running`
-
-```text
-Usage: hexaflow [OPTIONS] COMMAND [ARGS]...
-Try 'hexaflow --help' for help.
-╭─ Error ──────────────────────────────────────────────────────────────────────╮
-│ No such command 're-running'.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -205,8 +180,7 @@ Usage: hexaflow restart [OPTIONS] {run_id} {target}
 ```text
 Usage: hexaflow resume [OPTIONS] {run_id} {target}
 
- Resume a suspended workflow from its latest checkpoints without re-running
- completed steps.
+ Resume suspended workflow from latest checkpoints.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────╮
 │ *    run_id      <str>  Run ID of the suspended workflow. [required]         │
@@ -238,22 +212,12 @@ Usage: hexaflow run [OPTIONS] {target}
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `hexaflow specific`
-
-```text
-Usage: hexaflow [OPTIONS] COMMAND [ARGS]...
-Try 'hexaflow --help' for help.
-╭─ Error ──────────────────────────────────────────────────────────────────────╮
-│ No such command 'specific'.                                                  │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
 ### `hexaflow status`
 
 ```text
 Usage: hexaflow status [OPTIONS] {run_id}
 
- Display the execution status, stages, and step checkpoints of a workflow run.
+ Display execution status, stages, and step checkpoints.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────╮
 │ *    run_id      <str>  Workflow execution run ID. [required]                │
@@ -262,15 +226,5 @@ Usage: hexaflow status [OPTIONS] {run_id}
 │ --db          <str>  Path to SQLite state database.                          │
 │                      [default: .hexaflow/state.db]                           │
 │ --help               Show this message and exit.                             │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `hexaflow workflow`
-
-```text
-Usage: hexaflow [OPTIONS] COMMAND [ARGS]...
-Try 'hexaflow --help' for help.
-╭─ Error ──────────────────────────────────────────────────────────────────────╮
-│ No such command 'workflow'.                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```

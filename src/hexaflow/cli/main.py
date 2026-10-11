@@ -33,17 +33,35 @@ console = Console()
 def _load_workflow_from_target(
     target: str,
     params: dict[str, Any] | None = None,
+    allow_yaml: bool = False,
 ) -> Workflow:
     """Dynamically import a Workflow instance from a Python target or GitHub Actions YAML file.
 
+    Args:
+        target: Target specifier (e.g. 'pipeline.py:wf', or '.github/workflows/ci.yml').
+        params: Optional dictionary of keyword parameters passed to factory functions.
+        allow_yaml: Whether GitHub Actions YAML workflow files are permitted.
+
+    Returns:
+        Loaded Workflow instance.
+
+    Raises:
+        typer.BadParameter: If the target cannot be loaded or is disallowed.
+
     Notes/Architectural Intent:
         Supports:
-        - GitHub Actions workflow YAML files (*.yml, *.yaml).
+        - GitHub Actions workflow YAML files (*.yml, *.yaml) when `allow_yaml` is True.
         - Direct Workflow instances in a module (e.g. 'pipeline.py:my_workflow').
         - Factory callables returning a Workflow (e.g. 'pipeline.py:build_pipeline'),
           passing optional keyword parameters.
+        Execution commands ('run', 'resume', 'restart', 'abort') disallow YAML targets
+        because GitHub Actions steps do not contain executable Python callables.
     """
     if target.endswith((".yml", ".yaml")):
+        if not allow_yaml:
+            raise typer.BadParameter(
+                "GitHub Actions YAML targets can only be visualized with 'graph' commands and cannot be executed."
+            )
         from hexaflow.adapters.loaders.github_actions import load_github_actions_workflow
 
         try:
@@ -98,7 +116,7 @@ def status(
         ".hexaflow/state.db", "--db", help="Path to SQLite state database."
     ),
 ) -> None:
-    """Display the execution status, stages, and step checkpoints of a workflow run."""
+    """Display execution status, stages, and step checkpoints."""
     store = SqliteStateStore(db_path=db_path)
     run = store.get_run(run_id)
 
@@ -182,7 +200,7 @@ def inspect(
         ".hexaflow/state.db", "--db", help="Path to SQLite state database."
     ),
 ) -> None:
-    """Inspect input and output payloads or error tracebacks for a specific step."""
+    """Inspect payloads or error tracebacks for a step."""
     store = SqliteStateStore(db_path=db_path)
     chk = store.get_checkpoint(run_id, step_name)
 
@@ -251,7 +269,7 @@ def resume(
         ".hexaflow/state.db", "--db", help="Path to SQLite state database."
     ),
 ) -> None:
-    """Resume a suspended workflow from its latest checkpoints without re-running completed steps."""
+    """Resume suspended workflow from latest checkpoints."""
     wf = _load_workflow_from_target(target)
     store = SqliteStateStore(db_path=db_path)
     wf.bind_store(store)
@@ -377,19 +395,20 @@ def graph_render(
         except Exception as exc:
             raise typer.BadParameter(f"Invalid --params JSON string: {exc}") from exc
 
-    wf = _load_workflow_from_target(target, params=kw_params)
+    wf = _load_workflow_from_target(target, params=kw_params, allow_yaml=True)
 
     from hexaflow.ports.renderer import RenderOptions
 
+    err_console = Console(stderr=True)
     highlighted_nodes: frozenset[str] = frozenset()
     if dry_run:
-        console.print(f"[bold cyan]Simulating workflow:[/] {wf.name} (dry-run mode)")
+        err_console.print(f"[bold cyan]Simulating workflow:[/] {wf.name} (dry-run mode)")
         sim_state = wf.simulate()
         completed = frozenset(
             k for k, cp in sim_state.step_checkpoints.items() if cp.status == StepStatus.COMPLETED
         )
         highlighted_nodes = completed
-        console.print(
+        err_console.print(
             f"[bold green]✓ Simulation complete:[/] {len(completed)} steps executed (Status: {sim_state.status.value})"
         )
 
@@ -401,7 +420,7 @@ def graph_render(
 
     if output is not None:
         output.write_text(rendered_text, encoding="utf-8")
-        console.print(f"[bold green]✓ Diagram successfully written to:[/] {output}")
+        err_console.print(f"[bold green]✓ Diagram successfully written to:[/] {output}")
         return
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY") if summary else None
@@ -409,7 +428,7 @@ def graph_render(
         with open(summary_path, "a", encoding="utf-8") as f:
             f.write(f"### 🗺️ Planned Hexaflow Workflow: {wf.name}\n\n")
             f.write(f"```{format_name}\n{rendered_text}```\n")
-        console.print(f"[bold green]✓ Rendered diagram appended to:[/] {summary_path}")
+        err_console.print(f"[bold green]✓ Rendered diagram appended to:[/] {summary_path}")
         return
 
     print(rendered_text, end="" if rendered_text.endswith("\n") else "\n")
@@ -428,17 +447,19 @@ def graph_info(
         help="JSON string of keyword parameters passed to workflow factory functions.",
     ),
 ) -> None:
-    """Display topological metrics, stage distribution, and critical path for a workflow."""
+    """Display topological metrics and critical path."""
     kw_params: dict[str, Any] = {}
     if params:
         try:
             parsed = json.loads(params)
             if isinstance(parsed, dict):
                 kw_params = parsed
-        except Exception:
-            pass
+            else:
+                raise ValueError("Expected a JSON object mapping.")
+        except Exception as exc:
+            raise typer.BadParameter(f"Invalid --params JSON string: {exc}") from exc
 
-    wf = _load_workflow_from_target(target, params=kw_params)
+    wf = _load_workflow_from_target(target, params=kw_params, allow_yaml=True)
     graph = wf.to_graph()
 
     table = Table(title=f"Workflow Topological Graph: {wf.name} (v{wf.version})")

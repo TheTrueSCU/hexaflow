@@ -250,7 +250,8 @@ def deploy(ctx): return "live_deploy"
         ],
     )
     assert res.exit_code == 0
-    assert "Simulation complete" in res.stdout
+    assert "Simulation complete" in res.stderr
+    assert "Simulation complete" not in res.stdout
     assert out_file.exists()
     content = out_file.read_text(encoding="utf-8")
     assert "extract" in content
@@ -298,12 +299,48 @@ def test_cli_graph_render_invalid_params_json(tmp_path: Path) -> None:
     assert res_not_dict.exit_code != 0
 
 
+def test_cli_graph_info_invalid_params_json(tmp_path: Path) -> None:
+    yaml_file = tmp_path / "ci.yml"
+    yaml_file.write_text("name: CI\njobs:\n  a: {}\n", encoding="utf-8")
+    res = runner.invoke(app, ["graph", "info", str(yaml_file), "--params", "not_valid_json"])
+    assert res.exit_code != 0
+
+    res_not_dict = runner.invoke(app, ["graph", "info", str(yaml_file), "--params", "[1, 2]"])
+    assert res_not_dict.exit_code != 0
+
+
 def test_cli_graph_render_critical_path(tmp_path: Path) -> None:
     yaml_file = tmp_path / "ci.yml"
     yaml_file.write_text("name: CI\njobs:\n  a: {}\n  b: {needs: a}\n", encoding="utf-8")
     res = runner.invoke(app, ["graph", "render", str(yaml_file), "--critical-path"])
     assert res.exit_code == 0
     assert "a --> b" in res.stdout
+
+
+def test_cli_graph_render_dry_run_stdout_stderr_separation(tmp_path: Path) -> None:
+    yaml_file = tmp_path / "ci.yml"
+    yaml_file.write_text("name: CI\njobs:\n  a: {}\n  b: {needs: a}\n", encoding="utf-8")
+    res = runner.invoke(app, ["graph", "render", str(yaml_file), "--dry-run"])
+    assert res.exit_code == 0
+    assert "Simulation complete" in res.stderr
+    assert "Simulation complete" not in res.stdout
+    assert "flowchart TD" in res.stdout
+
+
+def test_cli_run_disallows_yaml_target(tmp_path: Path) -> None:
+    yaml_file = tmp_path / "ci.yml"
+    yaml_file.write_text("name: CI\njobs:\n  a: {}\n", encoding="utf-8")
+    res = runner.invoke(app, ["run", str(yaml_file)])
+    assert res.exit_code != 0
+    assert "GitHub Actions YAML targets can only be visualized" in res.output
+
+
+def test_cli_resume_disallows_yaml_target(tmp_path: Path) -> None:
+    yaml_file = tmp_path / "ci.yml"
+    yaml_file.write_text("name: CI\njobs:\n  a: {}\n", encoding="utf-8")
+    res = runner.invoke(app, ["resume", "run-123", str(yaml_file)])
+    assert res.exit_code != 0
+    assert "GitHub Actions YAML targets can only be visualized" in res.output
 
 
 def test_cli_graph_info_with_params(tmp_path: Path) -> None:

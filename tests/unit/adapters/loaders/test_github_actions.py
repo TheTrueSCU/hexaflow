@@ -26,14 +26,18 @@ jobs:
       - lint
       - test
     runs-on: ubuntu-latest
+  extra:
+    needs: 123
+    runs-on: ubuntu-latest
 """
     wf = load_github_actions_workflow(yaml_content)
     assert wf.name == "Sample Pipeline"
 
     graph = wf.to_graph()
-    assert set(graph.nodes.keys()) == {"lint", "test", "deploy"}
+    assert set(graph.nodes.keys()) == {"lint", "test", "deploy", "extra"}
     assert graph.predecessors("test") == ["lint"]
     assert graph.predecessors("deploy") == ["lint", "test"]
+    assert graph.predecessors("extra") == []
 
     mermaid = wf.render("mermaid")
     assert "lint --> test" in mermaid
@@ -60,6 +64,17 @@ jobs:
     assert "build" in wf.to_graph().nodes
     assert "check" in wf.to_graph().nodes
 
+    # Also test passing file path as a string
+    wf_from_str = load_github_actions_workflow(str(workflow_file))
+    assert wf_from_str.name == "Minimal CI"
+
+
+def test_noop_action() -> None:
+    from hexaflow.adapters.loaders.github_actions import _noop_action
+
+    res = _noop_action(None)
+    assert res == "ok"
+
 
 def test_load_github_actions_nonexistent_file() -> None:
     with pytest.raises(FileNotFoundError, match="not found"):
@@ -84,3 +99,47 @@ def test_load_github_actions_directory_path(tmp_path: Path) -> None:
 def test_load_github_actions_non_dict_root() -> None:
     with pytest.raises(ValueError, match="root must be a YAML mapping"):
         load_github_actions_workflow("- item1\n- item2\n")
+
+
+def test_load_github_actions_job_not_mapping() -> None:
+    yaml_text = """
+name: Bad Job
+jobs:
+  invalid_job: "not a dictionary"
+"""
+    with pytest.raises(ValueError, match="job 'invalid_job' must be a mapping"):
+        load_github_actions_workflow(yaml_text)
+
+
+def test_github_actions_yaml_loader_preserves_strings() -> None:
+    import yaml
+
+    from hexaflow.adapters.loaders.github_actions import GitHubActionsYamlLoader
+
+    sample_yaml = """
+name: CI
+on:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      FEATURE_FLAG: on
+      LOG_LEVEL: off
+      ACCEPT: yes
+      DECLINE: no
+      IS_ACTIVE: true
+      IS_DISABLED: false
+"""
+    data = yaml.load(sample_yaml, Loader=GitHubActionsYamlLoader)
+    assert "on" in data
+    assert isinstance(data["on"], dict)
+
+    job_env = data["jobs"]["test"]["env"]
+    assert job_env["FEATURE_FLAG"] == "on"
+    assert job_env["LOG_LEVEL"] == "off"
+    assert job_env["ACCEPT"] == "yes"
+    assert job_env["DECLINE"] == "no"
+    assert job_env["IS_ACTIVE"] is True
+    assert job_env["IS_DISABLED"] is False

@@ -9,12 +9,46 @@ Notes/Architectural Intent:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from hexaflow.dsl.builder import Workflow
+
+
+class GitHubActionsYamlLoader(yaml.SafeLoader):
+    """YAML safe loader that preserves unquoted 'on', 'off', 'yes', 'no' as strings.
+
+    Notes/Architectural Intent:
+        GitHub Actions workflows use 'on:' as a top-level mapping key for triggers.
+        Standard PyYAML 1.1 coerces unquoted 'on', 'off', 'yes', 'no' into booleans.
+        This loader removes boolean resolution for these tokens to preserve triggers
+        and scalar values correctly while retaining standard 'true'/'false' booleans.
+    """
+
+
+# Isolate custom resolvers on the loader subclass to avoid mutating yaml.SafeLoader
+GitHubActionsYamlLoader.yaml_implicit_resolvers = {
+    k: list(v) for k, v in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+for _ch in ("o", "O", "y", "Y", "n", "N"):
+    GitHubActionsYamlLoader.yaml_implicit_resolvers[_ch] = [
+        (tag, regexp)
+        for tag, regexp in GitHubActionsYamlLoader.yaml_implicit_resolvers[_ch]
+        if tag != "tag:yaml.org,2002:bool"
+    ]
+
+_TRUE_FALSE_REGEX = re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$", re.X)
+for _ch in ("t", "T", "f", "F"):
+    GitHubActionsYamlLoader.yaml_implicit_resolvers[_ch] = [
+        ("tag:yaml.org,2002:bool", _TRUE_FALSE_REGEX)
+        if tag == "tag:yaml.org,2002:bool"
+        else (tag, regexp)
+        for tag, regexp in GitHubActionsYamlLoader.yaml_implicit_resolvers[_ch]
+    ]
 
 
 def _noop_action(ctx: Any) -> str:
@@ -96,7 +130,7 @@ def load_github_actions_workflow(source: str | Path) -> Workflow:
     raw_text, wf_default_name = _resolve_raw_yaml_and_name(source)
 
     try:
-        data = yaml.safe_load(raw_text)
+        data = yaml.load(raw_text, Loader=GitHubActionsYamlLoader)
     except Exception as exc:
         raise ValueError(f"Failed to parse GitHub Actions YAML: {exc}") from exc
 
@@ -111,13 +145,17 @@ def load_github_actions_workflow(source: str | Path) -> Workflow:
     wf = Workflow(wf_name)
 
     for job_id, job_info in jobs_data.items():
-        if isinstance(job_info, dict):
-            needs = _extract_job_needs(job_info)
-            wf.step(str(job_id), depends_on=needs)(_noop_action)
+        if not isinstance(job_info, dict):
+            raise ValueError(
+                f"Invalid GitHub Actions workflow: job '{job_id}' must be a mapping, got {type(job_info).__name__}."
+            )
+        needs = _extract_job_needs(job_info)
+        wf.step(str(job_id), depends_on=needs)(_noop_action)
 
     return wf
 
 
 __all__ = [
+    "GitHubActionsYamlLoader",
     "load_github_actions_workflow",
 ]
