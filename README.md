@@ -32,6 +32,9 @@
 ### Key Features
 * **Hierarchical Execution**: Workflows structured cleanly into **Stages** and **Steps**.
 * **DAG Splits & Joins**: Concurrently fan-out (split) and synchronize at barrier dependencies (join).
+* **Pluggable Graph Analysis & Multi-Format Renderers**: Structural reachability (`ancestors`, `descendants`, `blast_radius`), critical path latency bottleneck calculation, and export to Mermaid, Graphviz DOT, ASCII, JSON, SVG, and PNG.
+* **Dry-Run Simulation Mode**: Simulate workflows safely with synthetic mocks (`dry_run=...`), side-effect fail-closed guards (`side_effects=True`, `allow_unsafe`), and chaos fault injection without mutating databases or external APIs.
+* **Workflow Memento & Time-Travel Rewind**: Capture immutable state mementos (`to_memento()`, `restore_from_memento()`), rewind execution to before any historical step (`rewind_to()`), and replay downstream dependencies seamlessly.
 * **Fault Partitioning**: Transient retries with exponential backoff vs. permanent failure suspension (`SUSPENDED`).
 * **Checkpointed Resumption**: Automatically saves step inputs and outputs into an embedded SQLite store. Resume failed workflows from the point of failure without re-running completed steps.
 * **Dual DSL**: Decorator-based syntax for Pythonic simplicity (`@wf.stage`, `@wf.step`) alongside declarative classes for programmatic pipelines.
