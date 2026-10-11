@@ -6,8 +6,10 @@ Notes/Architectural Intent:
 
 from hexaflow.domain.exceptions import (
     CheckpointCorruptError,
+    DryRunUnsafeStepError,
     DuplicateStepError,
     InvalidWorkflowDAGError,
+    RendererToolNotFoundError,
     StepFailedError,
     StepNotFoundError,
     WorkflowAborted,
@@ -66,7 +68,16 @@ def test_hierarchy_of_domain_exceptions() -> None:
         StepNotFoundError("Step missing"),
         WorkflowAborted("Aborted by user"),
         CheckpointCorruptError("Bad checkpoint"),
+        DryRunUnsafeStepError("Unsafe mutating step without mock in dry-run"),
+        RendererToolNotFoundError("Renderer compiler not found"),
     ]
     for exc in exceptions:
         is_inst = isinstance(exc, WorkflowError)
         assert is_inst is True
+
+
+__all__ = [
+    "test_hierarchy_of_domain_exceptions",
+    "test_step_failed_error_preserves_context",
+    "test_workflow_suspended_preserves_run_metadata",
+]

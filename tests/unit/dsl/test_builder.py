@@ -260,3 +260,35 @@ def test_dsl_bind_store_invalid_engine() -> None:
     wf = Workflow("dummy_wf", engine=engine)
     with pytest.raises(TypeError, match="does not support binding a state store"):
         wf.bind_store(InMemoryStateStore())
+
+
+def test_workflow_dsl_graph_and_renderers() -> None:
+    """Validate to_graph, to_dot, render, and render_image via Workflow builder."""
+    wf = Workflow("graph_dsl_wf")
+
+    @wf.step("extract", estimated_duration_seconds=2.5)
+    def extract(ctx):
+        return [1, 2, 3]
+
+    @wf.step("transform", depends_on=["extract"], side_effects=True, estimated_duration_seconds=5.0)
+    def transform(ctx):
+        return [x * 2 for x in ctx.get("extract")]
+
+    graph = wf.to_graph()
+    assert graph.workflow_name == "graph_dsl_wf"
+    assert len(graph.nodes) == 2
+
+    # Test DOT rendering
+    dot_out = wf.to_dot()
+    assert 'digraph "graph_dsl_wf"' in dot_out
+
+    # Test generic render
+    mermaid_out = wf.render("mermaid")
+    assert "flowchart TD" in mermaid_out
+
+    json_out = wf.render("json")
+    assert '"workflow_id": "graph_dsl_wf"' in json_out
+
+    # Test image rendering (ascii fallback provides svg)
+    svg_bytes = wf.render_image("ascii", "svg")
+    assert svg_bytes.startswith(b"<svg")

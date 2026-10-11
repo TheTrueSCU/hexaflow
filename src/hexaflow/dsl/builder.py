@@ -8,10 +8,15 @@ Notes/Architectural Intent:
 
 from collections.abc import Callable
 from types import TracebackType
-from typing import Any
+from typing import (
+    Any,
+    Literal,
+)
 
 from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
+from hexaflow.adapters.renderers.registry import default_renderer_registry
 from hexaflow.adapters.storage.sqlite import SqliteStateStore
+from hexaflow.domain.graph import WorkflowGraph
 from hexaflow.domain.models import (
     ExecutionPool,
     StageDefinition,
@@ -23,6 +28,7 @@ from hexaflow.domain.models import (
 from hexaflow.domain.retry import RetryPolicy
 from hexaflow.domain.state import WorkflowExecutionState
 from hexaflow.ports.engine import WorkflowEnginePort
+from hexaflow.ports.renderer import RenderOptions
 from hexaflow.ports.storage import WorkflowStateStorePort
 
 
@@ -45,6 +51,9 @@ class _StepBuilder:
         map_over: str | None = None,
         concurrency_limit: int | None = None,
         pool: ExecutionPool = ExecutionPool.ASYNC,
+        side_effects: bool = False,
+        dry_run: Any | None = None,
+        estimated_duration_seconds: float = 1.0,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -61,6 +70,9 @@ class _StepBuilder:
         self.map_over = map_over
         self.concurrency_limit = concurrency_limit
         self.pool = pool
+        self.side_effects = side_effects
+        self.dry_run = dry_run
+        self.estimated_duration_seconds = estimated_duration_seconds
         self.description = description
         self.metadata = metadata or {}
 
@@ -79,6 +91,9 @@ class _StepBuilder:
             map_over=self.map_over,
             concurrency_limit=self.concurrency_limit,
             pool=self.pool,
+            side_effects=self.side_effects,
+            dry_run=self.dry_run,
+            estimated_duration_seconds=self.estimated_duration_seconds,
             description=self.description,
             metadata=self.metadata,
         )
@@ -188,6 +203,9 @@ class Workflow:
         timeout_seconds: float | None = None,
         is_split: bool = False,
         pool: ExecutionPool = ExecutionPool.ASYNC,
+        side_effects: bool = False,
+        dry_run: Any | None = None,
+        estimated_duration_seconds: float = 1.0,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -204,6 +222,9 @@ class Workflow:
             timeout_seconds: Maximum execution time.
             is_split: True if step output fans out across workers.
             pool: Execution strategy (ASYNC, THREAD, PROCESS).
+            side_effects: True if step alters external databases/APIs/state.
+            dry_run: Mock value or callable executed during dry-run simulations.
+            estimated_duration_seconds: Estimated step duration for critical path analysis.
             description: Optional documentation of the step's operation.
             metadata: Arbitrary step metadata.
 
@@ -229,6 +250,9 @@ class Workflow:
                 timeout_seconds=timeout_seconds,
                 is_split=is_split,
                 pool=pool,
+                side_effects=side_effects,
+                dry_run=dry_run,
+                estimated_duration_seconds=estimated_duration_seconds,
                 description=description,
                 metadata=metadata,
             )
@@ -250,6 +274,9 @@ class Workflow:
         retries: RetryPolicy | None = None,
         compensation: Any | None = None,
         timeout_seconds: float | None = None,
+        side_effects: bool = False,
+        dry_run: Any | None = None,
+        estimated_duration_seconds: float = 1.0,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -300,6 +327,9 @@ class Workflow:
                 map_over=over,
                 concurrency_limit=concurrency_limit,
                 pool=pool,
+                side_effects=side_effects,
+                dry_run=dry_run,
+                estimated_duration_seconds=estimated_duration_seconds,
                 description=description,
                 metadata=metadata,
             )
@@ -351,6 +381,14 @@ class Workflow:
             description=self.description,
         )
 
+    def to_graph(self) -> WorkflowGraph:
+        """Construct a topological WorkflowGraph for structural and reachability analysis.
+
+        Returns:
+            Populated WorkflowGraph instance.
+        """
+        return WorkflowGraph.from_workflow(self.to_definition())
+
     def to_mermaid(self, direction: str = "TD") -> str:
         """Render the workflow DAG as a Mermaid flowchart definition.
 
@@ -369,6 +407,58 @@ class Workflow:
             Formatted multiline string illustrating stages, steps, dependencies, and mapping.
         """
         return self.to_definition().to_ascii()
+
+    def to_dot(self, options: RenderOptions | None = None) -> str:
+        """Render the workflow DAG as a Graphviz DOT digraph.
+
+        Args:
+            options: Optional RenderOptions configuration.
+
+        Returns:
+            Graphviz DOT specification string.
+        """
+        renderer = default_renderer_registry.get("dot")
+        return renderer.render(self.to_graph(), options=options)
+
+    def render(
+        self,
+        format_name: str = "mermaid",
+        options: RenderOptions | None = None,
+    ) -> str:
+        """Render the workflow graph using a registered renderer format.
+
+        Args:
+            format_name: Name of renderer format ('mermaid', 'dot', 'ascii', 'json').
+            options: Optional RenderOptions configuration.
+
+        Returns:
+            Rendered diagram or structured output string.
+        """
+        renderer = default_renderer_registry.get(format_name)
+        return renderer.render(self.to_graph(), options=options)
+
+    def render_image(
+        self,
+        format_name: str = "mermaid",
+        image_format: Literal["png", "svg"] = "svg",
+        options: RenderOptions | None = None,
+    ) -> bytes:
+        """Render the workflow graph to an image binary (PNG or SVG).
+
+        Args:
+            format_name: Target renderer engine ('mermaid' or 'dot').
+            image_format: Output image format ('png' or 'svg').
+            options: Optional RenderOptions configuration.
+
+        Returns:
+            Raw image bytes.
+
+        Raises:
+            RendererToolNotFoundError: If the underlying CLI compiler is not installed.
+            RuntimeError: If image compilation fails.
+        """
+        renderer = default_renderer_registry.get(format_name)
+        return renderer.render_image(self.to_graph(), image_format=image_format, options=options)
 
     def run(
         self,

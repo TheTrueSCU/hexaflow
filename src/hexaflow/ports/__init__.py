@@ -6,9 +6,15 @@ Notes/Architectural Intent:
 """
 
 from hexaflow.ports.engine import WorkflowEnginePort
+from hexaflow.ports.renderer import (
+    GraphRendererPort,
+    RenderOptions,
+)
 from hexaflow.ports.storage import WorkflowStateStorePort
 
 __all__ = [
+    "GraphRendererPort",
+    "RenderOptions",
     "WorkflowEnginePort",
     "WorkflowStateStorePort",
 ]
