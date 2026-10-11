@@ -56,11 +56,10 @@ def test_json_render_structure() -> None:
     assert load_node["estimated_duration_seconds"] == 3.0
 
 
-def test_json_render_image_bytes() -> None:
+def test_json_render_image_raises_value_error() -> None:
+    import pytest
+
     adapter = JsonGraphRendererAdapter()
     graph = sample_graph()
-    img_bytes = adapter.render_image(graph)
-
-    assert isinstance(img_bytes, bytes)
-    parsed = json.loads(img_bytes.decode("utf-8"))
-    assert parsed["workflow_id"] == "json_wf"
+    with pytest.raises(ValueError, match="does not support binary image rendering"):
+        adapter.render_image(graph)

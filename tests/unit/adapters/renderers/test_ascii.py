@@ -71,3 +71,12 @@ def test_ascii_render_image_svg() -> None:
 
     assert img.startswith(b"<svg")
     assert b"ascii_wf" in img
+
+
+def test_ascii_render_image_png_raises() -> None:
+    import pytest
+
+    adapter = AsciiGraphRendererAdapter()
+    graph = sample_graph()
+    with pytest.raises(ValueError, match="only supports 'svg'"):
+        adapter.render_image(graph, "png")  # type: ignore[arg-type]

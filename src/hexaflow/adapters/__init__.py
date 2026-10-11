@@ -5,6 +5,7 @@ Notes/Architectural Intent:
 """
 
 from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
+from hexaflow.adapters.loaders.github_actions import load_github_actions_workflow
 from hexaflow.adapters.renderers.ascii import AsciiGraphRendererAdapter
 from hexaflow.adapters.renderers.dot import DotGraphRendererAdapter
 from hexaflow.adapters.renderers.json import JsonGraphRendererAdapter
@@ -24,6 +25,7 @@ __all__ = [
     "GraphRendererRegistry",
     "InMemoryStateStore",
     "JsonGraphRendererAdapter",
+    "load_github_actions_workflow",
     "MermaidGraphRendererAdapter",
     "SqliteStateStore",
 ]

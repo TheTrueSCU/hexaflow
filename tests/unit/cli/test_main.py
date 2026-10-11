@@ -7,6 +7,7 @@ Notes/Architectural Intent:
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from hexaflow.adapters.storage.sqlite import SqliteStateStore
@@ -147,3 +148,141 @@ def test_cli_bad_target_handling(tmp_path: Path) -> None:
     # Attr is not Workflow
     res_bad_type = runner.invoke(app, ["run", f"{script_path}:x"])
     assert res_bad_type.exit_code != 0
+
+
+def test_cli_graph_render_yaml(tmp_path: Path) -> None:
+    yaml_file = tmp_path / "pipeline.yml"
+    yaml_file.write_text(
+        """
+name: Build and Test
+jobs:
+  build:
+    steps: []
+  test:
+    needs: build
+    steps: []
+""",
+        encoding="utf-8",
+    )
+    res = runner.invoke(app, ["graph", "render", str(yaml_file), "--format", "mermaid"])
+    assert res.exit_code == 0
+    assert "build --> test" in res.stdout
+
+
+def test_cli_graph_render_python_target_and_factory(tmp_path: Path) -> None:
+    pipeline_file = tmp_path / "dynamic_pipeline.py"
+    pipeline_file.write_text(
+        """
+from hexaflow import Workflow
+
+def make_workflow(affected_packages=None):
+    wf = Workflow("dynamic_wf")
+    pkgs = affected_packages or ["core"]
+
+    @wf.step("root")
+    def root(ctx): return "root"
+
+    for p in pkgs:
+        @wf.step(f"test_{p}", depends_on=["root"])
+        def test_pkg(ctx, p=p): return f"tested_{p}"
+
+    return wf
+
+static_wf = make_workflow(["fixed"])
+""",
+        encoding="utf-8",
+    )
+
+    # 1. Static Workflow object
+    static_res = runner.invoke(
+        app,
+        ["graph", "render", f"{pipeline_file}:static_wf", "--format", "ascii"],
+    )
+    assert static_res.exit_code == 0
+    assert "Workflow: dynamic_wf" in static_res.stdout
+    assert "test_fixed" in static_res.stdout
+
+    # 2. Dynamic factory with --params
+    factory_res = runner.invoke(
+        app,
+        [
+            "graph",
+            "render",
+            f"{pipeline_file}:make_workflow",
+            "--params",
+            '{"affected_packages": ["pkg_a", "pkg_b"]}',
+            "--format",
+            "mermaid",
+        ],
+    )
+    assert factory_res.exit_code == 0
+    assert "test_pkg_a" in factory_res.stdout
+    assert "test_pkg_b" in factory_res.stdout
+
+
+def test_cli_graph_render_dry_run_and_output(tmp_path: Path) -> None:
+    pipeline_file = tmp_path / "sim_pipeline.py"
+    pipeline_file.write_text(
+        """
+from hexaflow import Workflow
+
+sim_wf = Workflow("sim_demo")
+
+@sim_wf.step("extract")
+def extract(ctx): return 42
+
+@sim_wf.step("deploy", depends_on=["extract"], side_effects=True, dry_run="mock_deploy")
+def deploy(ctx): return "live_deploy"
+""",
+        encoding="utf-8",
+    )
+
+    out_file = tmp_path / "output.mmd"
+    res = runner.invoke(
+        app,
+        [
+            "graph",
+            "render",
+            f"{pipeline_file}:sim_wf",
+            "--dry-run",
+            "--output",
+            str(out_file),
+        ],
+    )
+    assert res.exit_code == 0
+    assert "Simulation complete" in res.stdout
+    assert out_file.exists()
+    content = out_file.read_text(encoding="utf-8")
+    assert "extract" in content
+    assert "deploy" in content
+
+
+def test_cli_graph_render_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    yaml_file = tmp_path / "summary_ci.yml"
+    yaml_file.write_text("name: Summary CI\njobs:\n  gate:\n    steps: []\n", encoding="utf-8")
+    summary_md = tmp_path / "STEP_SUMMARY.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_md))
+
+    res = runner.invoke(app, ["graph", "render", str(yaml_file), "--summary"])
+    assert res.exit_code == 0
+    assert summary_md.exists()
+    summary_content = summary_md.read_text(encoding="utf-8")
+    assert "Planned Hexaflow Workflow" in summary_content
+    assert "```mermaid" in summary_content
+
+
+def test_cli_graph_info(tmp_path: Path) -> None:
+    yaml_file = tmp_path / "info_ci.yml"
+    yaml_file.write_text(
+        """
+name: Info Test
+jobs:
+  step_a: {}
+  step_b: {needs: step_a}
+""",
+        encoding="utf-8",
+    )
+    res = runner.invoke(app, ["graph", "info", str(yaml_file)])
+    assert res.exit_code == 0
+    assert "Total Steps (Nodes)" in res.stdout
+    assert "Total Dependencies (Edges)" in res.stdout

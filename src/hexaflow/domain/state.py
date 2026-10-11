@@ -150,8 +150,6 @@ class WorkflowExecutionState(BaseModel):
         Returns:
             WorkflowMemento capturing the current status, checkpoints, and stage.
         """
-        import copy
-
         return WorkflowMemento(
             run_id=self.run_id,
             workflow_name=self.workflow_name,
@@ -174,8 +172,6 @@ class WorkflowExecutionState(BaseModel):
         Raises:
             ValueError: If memento run_id does not match this state's run_id.
         """
-        import copy
-
         if memento.run_id != self.run_id:
             raise ValueError(
                 f"Cannot restore memento with run_id '{memento.run_id}' onto state with run_id '{self.run_id}'."

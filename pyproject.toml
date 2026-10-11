@@ -11,6 +11,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "pydantic>=2.10.0",
+    "pyyaml>=6.0.0",
     "rich>=13.9.0",
     "typer>=0.15.0",
 ]
@@ -74,6 +75,10 @@ ignore = ["E501", "RUF022"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["hexaflow"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
 
 [project.scripts]
 hexaflow = "hexaflow.cli.main:app"

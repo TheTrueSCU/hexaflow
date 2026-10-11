@@ -8,7 +8,9 @@ Notes/Architectural Intent:
 
 import importlib.util
 import json
+import os
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -28,10 +30,33 @@ app = typer.Typer(
 console = Console()
 
 
-def _load_workflow_from_target(target: str) -> Workflow:
-    """Dynamically import a Workflow instance from a 'path/to/file.py:workflow_name' string."""
+def _load_workflow_from_target(
+    target: str,
+    params: dict[str, Any] | None = None,
+) -> Workflow:
+    """Dynamically import a Workflow instance from a Python target or GitHub Actions YAML file.
+
+    Notes/Architectural Intent:
+        Supports:
+        - GitHub Actions workflow YAML files (*.yml, *.yaml).
+        - Direct Workflow instances in a module (e.g. 'pipeline.py:my_workflow').
+        - Factory callables returning a Workflow (e.g. 'pipeline.py:build_pipeline'),
+          passing optional keyword parameters.
+    """
+    if target.endswith((".yml", ".yaml")):
+        from hexaflow.adapters.loaders.github_actions import load_github_actions_workflow
+
+        try:
+            return load_github_actions_workflow(target)
+        except Exception as exc:
+            raise typer.BadParameter(
+                f"Failed to load GitHub Actions workflow '{target}': {exc}"
+            ) from exc
+
     if ":" not in target:
-        raise typer.BadParameter("Target must be in the format 'path/to/file.py:workflow_variable'")
+        raise typer.BadParameter(
+            "Target must be in the format 'path/to/file.py:workflow_variable' or a YAML file."
+        )
 
     file_part, attr_name = target.split(":", 1)
     file_path = Path(file_part).resolve()
@@ -49,13 +74,21 @@ def _load_workflow_from_target(target: str) -> Workflow:
     if not hasattr(module, attr_name):
         raise typer.BadParameter(f"Module '{file_path}' does not define '{attr_name}'.")
 
-    wf = getattr(module, attr_name)
-    if not isinstance(wf, Workflow):
+    attr = getattr(module, attr_name)
+    if isinstance(attr, Workflow):
+        return attr
+
+    if callable(attr):
+        result = attr(**(params or {}))
+        if isinstance(result, Workflow):
+            return result
         raise typer.BadParameter(
-            f"Attribute '{attr_name}' is not an instance of hexaflow.Workflow."
+            f"Callable '{attr_name}' returned {type(result).__name__}, expected hexaflow.Workflow."
         )
 
-    return wf
+    raise typer.BadParameter(
+        f"Attribute '{attr_name}' is not an instance or factory of hexaflow.Workflow."
+    )
 
 
 @app.command()
@@ -282,6 +315,148 @@ def abort(
     console.print(f"[bold magenta]Workflow run cancelled.[/] Status: {state.status.value}")
 
 
+graph_app = typer.Typer(
+    name="graph",
+    help="Workflow DAG inspection, analysis, and visualization commands.",
+    add_completion=False,
+)
+app.add_typer(graph_app, name="graph")
+
+
+@graph_app.command("render")
+def graph_render(
+    target: str = typer.Argument(
+        ...,
+        help="Workflow target (e.g. 'pipeline.py:wf', 'pipeline.py:factory', or '.github/workflows/ci.yml').",
+    ),
+    format_name: str = typer.Option(
+        "mermaid",
+        "--format",
+        "-f",
+        help="Renderer format ('mermaid', 'dot', 'ascii', 'json').",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Execute dry-run simulation in memory and render materialized dynamic DAG.",
+    ),
+    params: str | None = typer.Option(
+        None,
+        "--params",
+        "-p",
+        help="JSON string of keyword parameters passed to workflow factory functions.",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Optional destination file path to write rendered output to.",
+    ),
+    summary: bool = typer.Option(
+        False,
+        "--summary",
+        "-s",
+        help="Append rendered diagram to $GITHUB_STEP_SUMMARY markdown.",
+    ),
+    critical_path: bool = typer.Option(
+        False,
+        "--critical-path",
+        "-c",
+        help="Visually highlight the critical path in the rendered diagram.",
+    ),
+) -> None:
+    """Render a workflow dependency graph to Mermaid, DOT, ASCII, or JSON."""
+    kw_params: dict[str, Any] = {}
+    if params:
+        try:
+            parsed = json.loads(params)
+            if isinstance(parsed, dict):
+                kw_params = parsed
+            else:
+                raise ValueError("Expected a JSON object mapping.")
+        except Exception as exc:
+            raise typer.BadParameter(f"Invalid --params JSON string: {exc}") from exc
+
+    wf = _load_workflow_from_target(target, params=kw_params)
+
+    from hexaflow.ports.renderer import RenderOptions
+
+    highlighted_nodes: frozenset[str] = frozenset()
+    if dry_run:
+        console.print(f"[bold cyan]Simulating workflow:[/] {wf.name} (dry-run mode)")
+        sim_state = wf.simulate()
+        completed = frozenset(
+            k for k, cp in sim_state.step_checkpoints.items() if cp.status == StepStatus.COMPLETED
+        )
+        highlighted_nodes = completed
+        console.print(
+            f"[bold green]✓ Simulation complete:[/] {len(completed)} steps executed (Status: {sim_state.status.value})"
+        )
+
+    opts = RenderOptions(
+        highlight_critical_path=critical_path,
+        highlight_node_ids=highlighted_nodes,
+    )
+    rendered_text = wf.render(format_name=format_name, options=opts)
+
+    if output is not None:
+        output.write_text(rendered_text, encoding="utf-8")
+        console.print(f"[bold green]✓ Diagram successfully written to:[/] {output}")
+        return
+
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY") if summary else None
+    if summary and summary_path:
+        with open(summary_path, "a", encoding="utf-8") as f:
+            f.write(f"### 🗺️ Planned Hexaflow Workflow: {wf.name}\n\n")
+            f.write(f"```{format_name}\n{rendered_text}```\n")
+        console.print(f"[bold green]✓ Rendered diagram appended to:[/] {summary_path}")
+        return
+
+    print(rendered_text, end="" if rendered_text.endswith("\n") else "\n")
+
+
+@graph_app.command("info")
+def graph_info(
+    target: str = typer.Argument(
+        ...,
+        help="Workflow target (e.g. 'pipeline.py:wf', 'pipeline.py:factory', or '.github/workflows/ci.yml').",
+    ),
+    params: str | None = typer.Option(
+        None,
+        "--params",
+        "-p",
+        help="JSON string of keyword parameters passed to workflow factory functions.",
+    ),
+) -> None:
+    """Display topological metrics, stage distribution, and critical path for a workflow."""
+    kw_params: dict[str, Any] = {}
+    if params:
+        try:
+            parsed = json.loads(params)
+            if isinstance(parsed, dict):
+                kw_params = parsed
+        except Exception:
+            pass
+
+    wf = _load_workflow_from_target(target, params=kw_params)
+    graph = wf.to_graph()
+
+    table = Table(title=f"Workflow Topological Graph: {wf.name} (v{wf.version})")
+    table.add_column("Property", style="bold cyan")
+    table.add_column("Value", style="green")
+
+    crit = list(graph.critical_path())
+    table.add_row("Total Steps (Nodes)", str(len(graph.nodes)))
+    table.add_row("Total Dependencies (Edges)", str(len(graph.edges)))
+    table.add_row("Stages", ", ".join(graph.stages.keys()))
+    table.add_row("Critical Path Length", str(len(crit)))
+    table.add_row("Critical Path Sequence", " ➔ ".join(crit))
+    table.add_row("Estimated Latency", f"{graph.critical_path_duration():.2f}s")
+
+    console.print(table)
+
+
 __all__ = [
     "app",
+    "graph_app",
 ]

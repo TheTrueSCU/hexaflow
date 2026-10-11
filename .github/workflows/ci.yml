@@ -52,7 +52,8 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Visualize Planned Workflow DAG
-        run: uv run python .github/scripts/visualize_ci_dag.py
+        run: uv run hexaflow graph render .github/workflows/ci.yml --summary
+
 
 
       - name: Run Unit & Integration Tests

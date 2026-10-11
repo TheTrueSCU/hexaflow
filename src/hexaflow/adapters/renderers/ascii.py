@@ -92,7 +92,15 @@ class AsciiGraphRendererAdapter(GraphRendererPort):
 
         Returns:
             SVG bytes wrapping the ASCII text inside a monospace SVG document.
+
+        Raises:
+            ValueError: If image_format is not 'svg'.
         """
+        if image_format != "svg":
+            raise ValueError(
+                f"AsciiGraphRendererAdapter only supports 'svg' image format, got '{image_format}'."
+            )
+
         ascii_text = self.render(graph, options)
         escaped_text = ascii_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         lines = escaped_text.splitlines()

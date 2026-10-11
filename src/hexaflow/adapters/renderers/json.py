@@ -84,17 +84,23 @@ class JsonGraphRendererAdapter(GraphRendererPort):
         image_format: Literal["png", "svg"] = "svg",
         options: RenderOptions | None = None,
     ) -> bytes:
-        """Serializes to raw JSON bytes.
+        """JsonGraphRendererAdapter does not support binary image compilation.
 
         Args:
             graph: The WorkflowGraph to render.
-            image_format: Ignored for JSON renderer.
+            image_format: Desired binary format.
             options: Optional RenderOptions.
 
         Returns:
-            UTF-8 encoded JSON bytes.
+            Never returns normally.
+
+        Raises:
+            ValueError: Always raised since JSON renderer produces structured text.
         """
-        return self.render(graph, options).encode("utf-8")
+        raise ValueError(
+            "JsonGraphRendererAdapter does not support binary image rendering. "
+            "Use render() for structured JSON output."
+        )
 
     def _serialize_node(
         self,
