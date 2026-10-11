@@ -6,6 +6,10 @@ Notes/Architectural Intent:
 
 from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
 from hexaflow.adapters.loaders.github_actions import load_github_actions_workflow
+from hexaflow.adapters.middleware.base import InOutStepMiddleware
+from hexaflow.adapters.middleware.logging import LoggingStepMiddleware
+from hexaflow.adapters.middleware.mock import MockFallbackMiddleware
+from hexaflow.adapters.middleware.timing import TimingStepMiddleware
 from hexaflow.adapters.renderers.ascii import AsciiGraphRendererAdapter
 from hexaflow.adapters.renderers.dot import DotGraphRendererAdapter
 from hexaflow.adapters.renderers.json import JsonGraphRendererAdapter
@@ -24,8 +28,12 @@ __all__ = [
     "DotGraphRendererAdapter",
     "GraphRendererRegistry",
     "InMemoryStateStore",
+    "InOutStepMiddleware",
     "JsonGraphRendererAdapter",
     "load_github_actions_workflow",
+    "LoggingStepMiddleware",
     "MermaidGraphRendererAdapter",
+    "MockFallbackMiddleware",
     "SqliteStateStore",
+    "TimingStepMiddleware",
 ]

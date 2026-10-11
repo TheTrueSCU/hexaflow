@@ -349,3 +349,32 @@ def test_workflow_dsl_rewind() -> None:
     res2 = wf.rewind(res1.run_id, to_step="step_b")
     assert res2.status == WorkflowStatus.COMPLETED
     assert counts == {"a": 1, "b": 2}
+
+
+def test_workflow_dsl_middleware_registration_and_execution() -> None:
+    """Validate wf.use(middleware) and constructor middleware support in Workflow DSL."""
+    from hexaflow.adapters.middleware.timing import TimingStepMiddleware
+    from hexaflow.domain.state import StepContext
+
+    class CustomMarkerMiddleware:
+        def __call__(self, ctx: StepContext, next_call):
+            ctx.metadata["custom_marker"] = True
+            return next_call(ctx)
+
+    marker_mw = CustomMarkerMiddleware()
+    timing_mw = TimingStepMiddleware()
+    store = InMemoryStateStore()
+
+    wf = Workflow("middleware_dsl_wf", state_store=store, middleware=[marker_mw])
+    wf.use(timing_mw)
+
+    assert len(wf.middleware) == 2
+
+    @wf.step("compute")
+    def compute(ctx: StepContext) -> int:
+        assert ctx.metadata.get("custom_marker") is True
+        return 777
+
+    res = wf.run()
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["compute"].output_payload == 777

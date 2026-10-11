@@ -15,6 +15,11 @@ import logging
 import multiprocessing
 import os
 import traceback
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Sequence,
+)
 from datetime import UTC, datetime
 from types import TracebackType
 from typing import Any
@@ -45,6 +50,7 @@ from hexaflow.domain.state import (
     WorkflowStatus,
 )
 from hexaflow.ports.engine import WorkflowEnginePort
+from hexaflow.ports.middleware import StepMiddlewarePort
 from hexaflow.ports.storage import WorkflowStateStorePort
 
 logger = logging.getLogger(__name__)
@@ -93,6 +99,7 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         state_store: WorkflowStateStorePort | None = None,
         max_process_workers: int | None = None,
         max_thread_workers: int | None = None,
+        middleware: Sequence[StepMiddlewarePort] | None = None,
     ) -> None:
         """Initialize the engine with an optional state store and worker concurrency bounds.
 
@@ -100,12 +107,72 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             state_store: Persistence store for checkpoints. Defaults to InMemoryStateStore.
             max_process_workers: Optional maximum worker processes for ExecutionPool.PROCESS.
             max_thread_workers: Optional maximum worker threads for ExecutionPool.THREAD.
+            middleware: Optional ordered list of StepMiddlewarePort interceptors.
         """
         self._store: WorkflowStateStorePort = state_store or InMemoryStateStore()
         self._max_process_workers = max_process_workers
         self._max_thread_workers = max_thread_workers
+        self._middleware: list[StepMiddlewarePort] = (
+            list(middleware) if middleware is not None else []
+        )
         self._process_pool: concurrent.futures.ProcessPoolExecutor | None = None
         self._thread_pool: concurrent.futures.ThreadPoolExecutor | None = None
+
+    @property
+    def middleware(self) -> list[StepMiddlewarePort]:
+        """Return registered step middlewares.
+
+        Returns:
+            List of registered StepMiddlewarePort instances.
+
+        Notes/Architectural Intent:
+            Exposes defensive list copy of configured step middlewares for inspection and testing.
+        """
+        return list(self._middleware)
+
+    def use(self, middleware: StepMiddlewarePort) -> "AsyncioWorkflowEngine":
+        """Register a StepMiddlewarePort interceptor onto the engine execution pipeline.
+
+        Args:
+            middleware: StepMiddlewarePort instance to register.
+
+        Returns:
+            Self for fluent method chaining.
+
+        Notes/Architectural Intent:
+            Appends interceptor to middleware stack, evaluated in registration order around steps.
+        """
+        self._middleware.append(middleware)
+        return self
+
+    async def _execute_with_middleware(
+        self,
+        ctx: StepContext,
+        target_action: Callable[[StepContext], Awaitable[Any]],
+    ) -> Any:
+        """Dispatch a step through the onion-layered middleware pipeline.
+
+        Notes/Architectural Intent:
+            Chains registered StepMiddlewarePort interceptors using the reversed
+            lambda composition pattern matching Hexastack bus middleware execution.
+        """
+
+        def _wrap(
+            m: StepMiddlewarePort, n: Callable[[StepContext], Any]
+        ) -> Callable[[StepContext], Any]:
+            def _step_handler(c: StepContext) -> Any:
+                return m(c, n)
+
+            return _step_handler
+
+        pipeline: Callable[[StepContext], Any] = target_action
+        for mw in reversed(self._middleware):
+            pipeline = _wrap(mw, pipeline)
+
+        result = pipeline(ctx)
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
     def _get_process_pool(self) -> concurrent.futures.ProcessPoolExecutor:
         """Get or lazily instantiate the shared process worker pool."""
@@ -608,37 +675,40 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         if step.name in faults:
             raise faults[step.name]
 
-        if not dry_run:
+        async def _target_action(c: StepContext) -> Any:
+            if not dry_run:
+                if step.timeout_seconds:
+                    return await asyncio.wait_for(
+                        self._invoke_callable(step.action, c, pool=step.pool),
+                        timeout=step.timeout_seconds,
+                    )
+                return await self._invoke_callable(step.action, c, pool=step.pool)
+
+            # Dry-run execution path
+            if step.side_effects and not allow_unsafe:
+                if step.dry_run is None:
+                    raise DryRunUnsafeStepError(
+                        f"Step '{step.name}' has side effects (side_effects=True) "
+                        "and cannot be executed during dry-run simulation without "
+                        "a mock fallback (dry_run=...) or allow_unsafe=True."
+                    )
+                if callable(step.dry_run):
+                    return await self._invoke_callable(step.dry_run, c, pool=ExecutionPool.ASYNC)
+                return step.dry_run
+
+            if step.dry_run is not None:
+                if callable(step.dry_run):
+                    return await self._invoke_callable(step.dry_run, c, pool=ExecutionPool.ASYNC)
+                return step.dry_run
+
             if step.timeout_seconds:
                 return await asyncio.wait_for(
-                    self._invoke_callable(step.action, ctx, pool=step.pool),
+                    self._invoke_callable(step.action, c, pool=step.pool),
                     timeout=step.timeout_seconds,
                 )
-            return await self._invoke_callable(step.action, ctx, pool=step.pool)
+            return await self._invoke_callable(step.action, c, pool=step.pool)
 
-        # Dry-run execution path
-        if step.side_effects and not allow_unsafe:
-            if step.dry_run is None:
-                raise DryRunUnsafeStepError(
-                    f"Step '{step.name}' has side effects (side_effects=True) "
-                    "and cannot be executed during dry-run simulation without "
-                    "a mock fallback (dry_run=...) or allow_unsafe=True."
-                )
-            if callable(step.dry_run):
-                return await self._invoke_callable(step.dry_run, ctx, pool=ExecutionPool.ASYNC)
-            return step.dry_run
-
-        if step.dry_run is not None:
-            if callable(step.dry_run):
-                return await self._invoke_callable(step.dry_run, ctx, pool=ExecutionPool.ASYNC)
-            return step.dry_run
-
-        if step.timeout_seconds:
-            return await asyncio.wait_for(
-                self._invoke_callable(step.action, ctx, pool=step.pool),
-                timeout=step.timeout_seconds,
-            )
-        return await self._invoke_callable(step.action, ctx, pool=step.pool)
+        return await self._execute_with_middleware(ctx, _target_action)
 
     async def _execute_step(
         self,
@@ -741,6 +811,7 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                 step_name=step.name,
                 attempt_number=attempt,
                 inputs=step_inputs,
+                metadata={"dry_run": dry_run},
             )
 
             try:
@@ -986,40 +1057,43 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         if step.name in faults:
             raise faults[step.name]
 
-        if not dry_run:
+        async def _target_mapped_action(c: StepContext) -> Any:
+            if not dry_run:
+                if step.timeout_seconds:
+                    return await asyncio.wait_for(
+                        self._invoke_mapped_callable(step.action, item, c, pool=step.pool),
+                        timeout=step.timeout_seconds,
+                    )
+                return await self._invoke_mapped_callable(step.action, item, c, pool=step.pool)
+
+            if step.side_effects and not allow_unsafe:
+                if step.dry_run is None:
+                    raise DryRunUnsafeStepError(
+                        f"Mapped step '{step.name}' has side effects (side_effects=True) "
+                        "and cannot be executed during dry-run simulation without "
+                        "a mock fallback (dry_run=...) or allow_unsafe=True."
+                    )
+                if callable(step.dry_run):
+                    return await self._invoke_mapped_callable(
+                        step.dry_run, item, c, pool=ExecutionPool.ASYNC
+                    )
+                return step.dry_run
+
+            if step.dry_run is not None:
+                if callable(step.dry_run):
+                    return await self._invoke_mapped_callable(
+                        step.dry_run, item, c, pool=ExecutionPool.ASYNC
+                    )
+                return step.dry_run
+
             if step.timeout_seconds:
                 return await asyncio.wait_for(
-                    self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool),
+                    self._invoke_mapped_callable(step.action, item, c, pool=step.pool),
                     timeout=step.timeout_seconds,
                 )
-            return await self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool)
+            return await self._invoke_mapped_callable(step.action, item, c, pool=step.pool)
 
-        if step.side_effects and not allow_unsafe:
-            if step.dry_run is None:
-                raise DryRunUnsafeStepError(
-                    f"Mapped step '{step.name}' has side effects (side_effects=True) "
-                    "and cannot be executed during dry-run simulation without "
-                    "a mock fallback (dry_run=...) or allow_unsafe=True."
-                )
-            if callable(step.dry_run):
-                return await self._invoke_mapped_callable(
-                    step.dry_run, item, ctx, pool=ExecutionPool.ASYNC
-                )
-            return step.dry_run
-
-        if step.dry_run is not None:
-            if callable(step.dry_run):
-                return await self._invoke_mapped_callable(
-                    step.dry_run, item, ctx, pool=ExecutionPool.ASYNC
-                )
-            return step.dry_run
-
-        if step.timeout_seconds:
-            return await asyncio.wait_for(
-                self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool),
-                timeout=step.timeout_seconds,
-            )
-        return await self._invoke_mapped_callable(step.action, item, ctx, pool=step.pool)
+        return await self._execute_with_middleware(ctx, _target_mapped_action)
 
     async def _execute_mapped_sub_step(
         self,
@@ -1077,6 +1151,11 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                 step_name=sub_step_name,
                 attempt_number=attempt,
                 inputs=sub_inputs,
+                metadata={
+                    "dry_run": dry_run,
+                    "mapped_index": idx,
+                    "parent_step": step.name,
+                },
             )
 
             try:

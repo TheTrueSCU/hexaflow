@@ -6,6 +6,8 @@ Notes/Architectural Intent:
     compensating rollbacks on abort.
 """
 
+from typing import Any
+
 import pytest
 
 from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
@@ -1087,3 +1089,72 @@ def test_mapped_step_simulation_side_effects_and_mock() -> None:
     assert sim_res.status == WorkflowStatus.COMPLETED
     assert real_executed == []  # Real action was not invoked
     assert sim_res.step_checkpoints["process_items_mocked"].output_payload == [99, 198]
+
+
+def test_engine_middleware_onion_order_and_hooks() -> None:
+    """Validate that engine runs multiple middlewares in nested onion order."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+    execution_trail: list[str] = []
+
+    class OuterMiddleware:
+        def __call__(self, ctx: StepContext, next_call: Any) -> Any:
+            execution_trail.append(f"outer:before:{ctx.step_name}")
+            res = next_call(ctx)
+            execution_trail.append(f"outer:after:{ctx.step_name}")
+            return res
+
+    class InnerMiddleware:
+        def __call__(self, ctx: StepContext, next_call: Any) -> Any:
+            execution_trail.append(f"inner:before:{ctx.step_name}")
+            res = next_call(ctx)
+            execution_trail.append(f"inner:after:{ctx.step_name}")
+            return res
+
+    engine.use(OuterMiddleware()).use(InnerMiddleware())
+
+    step = StepDefinition(name="do_work", action=lambda ctx: "done")
+    wf = WorkflowDefinition(
+        name="mw_order_wf",
+        stages=(StageDefinition(name="stg", steps=(step,)),),
+    )
+
+    res = engine.run(wf)
+    assert res.status == WorkflowStatus.COMPLETED
+    expected_order = [
+        "outer:before:do_work",
+        "inner:before:do_work",
+        "inner:after:do_work",
+        "outer:after:do_work",
+    ]
+    assert execution_trail == expected_order
+
+
+def test_engine_middleware_interception_for_mapped_steps() -> None:
+    """Validate that engine middleware wraps each individual dynamically mapped sub-step."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+    visited_substeps: list[str] = []
+
+    class SubstepTracker:
+        def __call__(self, ctx: StepContext, next_call: Any) -> Any:
+            visited_substeps.append(ctx.step_name)
+            return next_call(ctx)
+
+    engine.use(SubstepTracker())
+
+    step = StepDefinition(
+        name="square_item",
+        action=lambda item: item * item,
+        is_mapped=True,
+        map_over="nums",
+    )
+    wf = WorkflowDefinition(
+        name="mapped_mw_wf",
+        stages=(StageDefinition(name="stg", steps=(step,)),),
+    )
+
+    res = engine.run(wf, initial_inputs={"nums": [10, 20]})
+    assert res.status == WorkflowStatus.COMPLETED
+    expected_steps = ["square_item[0]", "square_item[1]"]
+    assert visited_substeps == expected_steps
