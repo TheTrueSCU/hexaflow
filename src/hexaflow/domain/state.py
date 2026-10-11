@@ -70,6 +70,9 @@ class StepContext(BaseModel):
     checkpoint_dir: str | None = Field(
         default=None, description="Path to the scratch directory for this step."
     )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Ambient execution and middleware metadata dictionary."
+    )
 
 
 class CheckpointRecord(BaseModel):

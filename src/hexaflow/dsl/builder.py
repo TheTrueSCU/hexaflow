@@ -6,7 +6,7 @@ Notes/Architectural Intent:
     and delegating execution to WorkflowEnginePort.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from types import TracebackType
 from typing import (
     Any,
@@ -28,6 +28,7 @@ from hexaflow.domain.models import (
 from hexaflow.domain.retry import RetryPolicy
 from hexaflow.domain.state import WorkflowExecutionState
 from hexaflow.ports.engine import WorkflowEnginePort
+from hexaflow.ports.middleware import StepMiddlewarePort
 from hexaflow.ports.renderer import RenderOptions
 from hexaflow.ports.storage import WorkflowStateStorePort
 
@@ -141,6 +142,7 @@ class Workflow:
         engine: WorkflowEnginePort | None = None,
         max_process_workers: int | None = None,
         max_thread_workers: int | None = None,
+        middleware: Sequence[StepMiddlewarePort] | None = None,
     ) -> None:
         """Initialize a new Workflow builder.
 
@@ -152,6 +154,7 @@ class Workflow:
             engine: Execution engine. Defaults to AsyncioWorkflowEngine.
             max_process_workers: Maximum child processes allocated for ExecutionPool.PROCESS.
             max_thread_workers: Maximum worker threads allocated for ExecutionPool.THREAD.
+            middleware: Optional sequence of StepMiddlewarePort pipeline interceptors.
         """
         self.name = name
         self.version = version
@@ -163,9 +166,52 @@ class Workflow:
         self._store = state_store or SqliteStateStore()
         self._engine = engine or AsyncioWorkflowEngine(
             state_store=self._store,
+            middleware=middleware,
             max_process_workers=max_process_workers,
             max_thread_workers=max_thread_workers,
         )
+        if engine is not None and middleware:
+            for mw in middleware:
+                self.use(mw)
+
+    @property
+    def middleware(self) -> list[StepMiddlewarePort]:
+        """Return the sequence of configured step middlewares if supported by engine.
+
+        Returns:
+            List of registered StepMiddlewarePort instances.
+
+        Notes/Architectural Intent:
+            Delegates to underlying engine to retrieve configured step middleware interceptors.
+        """
+        raw_mw = getattr(self._engine, "middleware", None)
+        if isinstance(raw_mw, (list, tuple)):
+            return [m for m in raw_mw if isinstance(m, StepMiddlewarePort)]
+        return []
+
+    def use(self, middleware: StepMiddlewarePort) -> "Workflow":
+        """Register a step middleware interceptor into the execution engine.
+
+        Args:
+            middleware: StepMiddlewarePort instance intercepting step executions.
+
+        Returns:
+            Self for fluent chaining.
+
+        Raises:
+            TypeError: If the configured engine does not support middleware registration.
+
+        Notes/Architectural Intent:
+            Enables fluent registration wf.use(mw1).use(mw2) onto the configured engine.
+        """
+        use_fn = getattr(self._engine, "use", None)
+        if not callable(use_fn):
+            raise TypeError(
+                f"Workflow engine '{type(self._engine).__name__}' does not support "
+                "step middleware registration via use()."
+            )
+        use_fn(middleware)
+        return self
 
     def stage(
         self,

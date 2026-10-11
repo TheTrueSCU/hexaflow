@@ -36,6 +36,7 @@
 * **Dry-Run Simulation Mode**: Simulate workflows safely with synthetic mocks (`dry_run=...`), side-effect fail-closed guards (`side_effects=True`, `allow_unsafe`), and chaos fault injection without mutating databases or external APIs.
 * **Workflow Memento & Time-Travel Rewind**: Capture immutable state mementos (`to_memento()`, `restore_from_memento()`), rewind execution to before any historical step (`rewind_to()`), and replay downstream dependencies seamlessly.
 * **Fault Partitioning**: Transient retries with exponential backoff vs. permanent failure suspension (`SUSPENDED`).
+* **Step Middleware Pipeline**: Onion-layered execution interceptors (`StepMiddlewarePort`, `InOutStepMiddleware`) supporting structured logging (`LoggingStepMiddleware`), high-precision latency metrics (`TimingStepMiddleware`), and whole-system simulation mock fallbacks (`MockFallbackMiddleware`).
 * **Checkpointed Resumption**: Automatically saves step inputs and outputs into an embedded SQLite store. Resume failed workflows from the point of failure without re-running completed steps.
 * **Dual DSL**: Decorator-based syntax for Pythonic simplicity (`@wf.stage`, `@wf.step`) alongside declarative classes for programmatic pipelines.
 
