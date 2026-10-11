@@ -378,3 +378,21 @@ def test_workflow_dsl_middleware_registration_and_execution() -> None:
     res = wf.run()
     assert res.status == WorkflowStatus.COMPLETED
     assert res.step_checkpoints["compute"].output_payload == 777
+
+
+def test_workflow_dsl_middleware_unsupported_engine() -> None:
+    """Validate that Workflow.use raises TypeError when engine does not support middleware."""
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    from hexaflow.adapters.middleware.timing import TimingStepMiddleware
+
+    mock_engine = MagicMock(spec=[])  # Empty spec, no use method
+    wf = Workflow("no_mw_engine", engine=mock_engine)
+
+    mw = TimingStepMiddleware()
+    with pytest.raises(TypeError, match="does not support step middleware"):
+        wf.use(mw)
+
+    assert wf.middleware == []

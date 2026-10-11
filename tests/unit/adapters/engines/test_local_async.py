@@ -1158,3 +1158,51 @@ def test_engine_middleware_interception_for_mapped_steps() -> None:
     assert res.status == WorkflowStatus.COMPLETED
     expected_steps = ["square_item[0]", "square_item[1]"]
     assert visited_substeps == expected_steps
+
+
+def test_engine_middleware_intercepts_fault_injection() -> None:
+    """Validate that injected faults flow through middleware error handling."""
+    from hexaflow.adapters.middleware.timing import TimingStepMiddleware
+
+    store = InMemoryStateStore()
+    timing_mw = TimingStepMiddleware()
+    engine = AsyncioWorkflowEngine(state_store=store, middleware=[timing_mw])
+
+    step = StepDefinition(name="fail_step", action=lambda ctx: "never")
+    wf = WorkflowDefinition(
+        name="fault_mw_wf",
+        stages=(StageDefinition(name="stg", steps=(step,)),),
+    )
+
+    res = engine.run(wf, fault_injection={"fail_step": RuntimeError("injected fault")})
+    assert res.status == WorkflowStatus.SUSPENDED
+    assert "RuntimeError" in (res.error_summary or "")
+
+
+def test_engine_middleware_wraps_step_timeout() -> None:
+    """Validate that step timeout wraps entire middleware dispatch."""
+    import inspect
+
+    store = InMemoryStateStore()
+
+    class HangingMiddleware:
+        async def __call__(self, ctx: StepContext, next_call: Any) -> Any:
+            import asyncio
+
+            await asyncio.sleep(0.15)
+            res = next_call(ctx)
+            if inspect.isawaitable(res):
+                return await res
+            return res
+
+    engine = AsyncioWorkflowEngine(state_store=store, middleware=[HangingMiddleware()])
+
+    step = StepDefinition(name="quick_step", action=lambda ctx: "done", timeout_seconds=0.05)
+    wf = WorkflowDefinition(
+        name="timeout_mw_wf",
+        stages=(StageDefinition(name="stg", steps=(step,)),),
+    )
+
+    res = engine.run(wf)
+    assert res.status == WorkflowStatus.SUSPENDED
+    assert "TimeoutError" in (res.error_summary or "")

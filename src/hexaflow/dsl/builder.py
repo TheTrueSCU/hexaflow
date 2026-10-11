@@ -198,12 +198,19 @@ class Workflow:
         Returns:
             Self for fluent chaining.
 
+        Raises:
+            TypeError: If the configured engine does not support middleware registration.
+
         Notes/Architectural Intent:
             Enables fluent registration wf.use(mw1).use(mw2) onto the configured engine.
         """
         use_fn = getattr(self._engine, "use", None)
-        if callable(use_fn):
-            use_fn(middleware)
+        if not callable(use_fn):
+            raise TypeError(
+                f"Workflow engine '{type(self._engine).__name__}' does not support "
+                "step middleware registration via use()."
+            )
+        use_fn(middleware)
         return self
 
     def stage(

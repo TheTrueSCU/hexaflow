@@ -100,10 +100,10 @@ class InOutStepMiddleware(StepMiddlewarePort):
             async def _async_wrap() -> Any:
                 try:
                     res = await result
-                    return self.after(ctx, res, context)
                 except Exception as async_exc:
                     self.on_error(ctx, async_exc, context)
                     raise
+                return self.after(ctx, res, context)
 
             return cast("R", _async_wrap())
 

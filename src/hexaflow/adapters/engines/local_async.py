@@ -670,18 +670,12 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         allow_unsafe: bool = False,
         fault_injection: dict[str, Exception] | None = None,
     ) -> Any:
-        """Execute step action or simulated dry_run mock callable."""
-        faults = fault_injection or {}
-        if step.name in faults:
-            raise faults[step.name]
-
         async def _target_action(c: StepContext) -> Any:
+            faults = fault_injection or {}
+            if step.name in faults:
+                raise faults[step.name]
+
             if not dry_run:
-                if step.timeout_seconds:
-                    return await asyncio.wait_for(
-                        self._invoke_callable(step.action, c, pool=step.pool),
-                        timeout=step.timeout_seconds,
-                    )
                 return await self._invoke_callable(step.action, c, pool=step.pool)
 
             # Dry-run execution path
@@ -701,14 +695,12 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                     return await self._invoke_callable(step.dry_run, c, pool=ExecutionPool.ASYNC)
                 return step.dry_run
 
-            if step.timeout_seconds:
-                return await asyncio.wait_for(
-                    self._invoke_callable(step.action, c, pool=step.pool),
-                    timeout=step.timeout_seconds,
-                )
             return await self._invoke_callable(step.action, c, pool=step.pool)
 
-        return await self._execute_with_middleware(ctx, _target_action)
+        dispatch_coro = self._execute_with_middleware(ctx, _target_action)
+        if step.timeout_seconds:
+            return await asyncio.wait_for(dispatch_coro, timeout=step.timeout_seconds)
+        return await dispatch_coro
 
     async def _execute_step(
         self,
@@ -1051,19 +1043,15 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
         fault_injection: dict[str, Exception] | None = None,
     ) -> Any:
         """Execute or simulate mapped sub-step action."""
-        faults = fault_injection or {}
-        if ctx.step_name in faults:
-            raise faults[ctx.step_name]
-        if step.name in faults:
-            raise faults[step.name]
 
         async def _target_mapped_action(c: StepContext) -> Any:
+            faults = fault_injection or {}
+            if c.step_name in faults:
+                raise faults[c.step_name]
+            if step.name in faults:
+                raise faults[step.name]
+
             if not dry_run:
-                if step.timeout_seconds:
-                    return await asyncio.wait_for(
-                        self._invoke_mapped_callable(step.action, item, c, pool=step.pool),
-                        timeout=step.timeout_seconds,
-                    )
                 return await self._invoke_mapped_callable(step.action, item, c, pool=step.pool)
 
             if step.side_effects and not allow_unsafe:
@@ -1086,14 +1074,12 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                     )
                 return step.dry_run
 
-            if step.timeout_seconds:
-                return await asyncio.wait_for(
-                    self._invoke_mapped_callable(step.action, item, c, pool=step.pool),
-                    timeout=step.timeout_seconds,
-                )
             return await self._invoke_mapped_callable(step.action, item, c, pool=step.pool)
 
-        return await self._execute_with_middleware(ctx, _target_mapped_action)
+        dispatch_coro = self._execute_with_middleware(ctx, _target_mapped_action)
+        if step.timeout_seconds:
+            return await asyncio.wait_for(dispatch_coro, timeout=step.timeout_seconds)
+        return await dispatch_coro
 
     async def _execute_mapped_sub_step(
         self,
