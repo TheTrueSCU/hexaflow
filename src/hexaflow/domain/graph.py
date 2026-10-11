@@ -329,7 +329,7 @@ class WorkflowGraph(BaseModel):
             node = self.nodes[step_name]
             duration = node.estimated_duration_seconds
 
-            max_parent_dist = 0.0
+            max_parent_dist = -1.0
             best_parent: str | None = None
             for p in node.parents:
                 p_dist = dist.get(p, 0.0)
@@ -337,11 +337,12 @@ class WorkflowGraph(BaseModel):
                     max_parent_dist = p_dist
                     best_parent = p
 
-            dist[step_name] = max_parent_dist + duration
+            dist[step_name] = max(max_parent_dist, 0.0) + duration
             pred[step_name] = best_parent
 
-        # Find leaf or step with highest accumulated distance
-        best_end = max(dist, key=lambda k: dist[k])
+        # Find leaf or step with highest accumulated distance (preferring leaves on ties)
+        leaves_set = {leaf.name for leaf in self.leaves()}
+        best_end = max(dist, key=lambda k: (dist[k], 1 if k in leaves_set else 0))
 
         path: list[str] = []
         curr: str | None = best_end

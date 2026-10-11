@@ -22,6 +22,11 @@ from hexaflow.ports.renderer import (
 )
 
 
+def _dot_escape(value: str) -> str:
+    """Escape backslashes and double quotes in DOT strings."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 class DotGraphRendererAdapter(GraphRendererPort):
     """Adapter for rendering WorkflowGraph into Graphviz DOT format.
 
@@ -56,10 +61,11 @@ class DotGraphRendererAdapter(GraphRendererPort):
         """
         opts = options or RenderOptions()
         rankdir = "LR" if opts.direction in ("LR", "RL") else "TB"
+        crit_set = set(graph.critical_path()) if opts.highlight_critical_path else set()
         critical_path_edges = self._extract_critical_path_edges(graph, opts)
 
         lines: list[str] = [
-            f'digraph "{graph.workflow_id}" {{',
+            f'digraph "{_dot_escape(graph.workflow_id)}" {{',
             f'    rankdir="{rankdir}";',
             '    node [shape="box", style="rounded,filled", fontname="Helvetica", fontsize=10];',
             '    edge [fontname="Helvetica", fontsize=8];',
@@ -67,10 +73,10 @@ class DotGraphRendererAdapter(GraphRendererPort):
         ]
 
         if opts.include_pools:
-            lines.extend(self._render_pools(graph, opts))
+            lines.extend(self._render_pools(graph, opts, crit_set))
         else:
             for node in graph.nodes.values():
-                lines.append(f"    {self._render_node(node, opts)};")
+                lines.append(f"    {self._render_node(node, opts, crit_set)};")
 
         lines.append("")
         for source_id, target_id in graph.edges:
@@ -81,7 +87,7 @@ class DotGraphRendererAdapter(GraphRendererPort):
                 edge_attrs.extend(['color="#6c757d"', 'penwidth="1.0"'])
 
             attr_str = f" [{', '.join(edge_attrs)}]" if edge_attrs else ""
-            lines.append(f'    "{source_id}" -> "{target_id}"{attr_str};')
+            lines.append(f'    "{_dot_escape(source_id)}" -> "{_dot_escape(target_id)}"{attr_str};')
 
         if opts.include_legend:
             lines.append("")
@@ -132,7 +138,9 @@ class DotGraphRendererAdapter(GraphRendererPort):
 
         return result.stdout
 
-    def _render_pools(self, graph: WorkflowGraph, opts: RenderOptions) -> list[str]:
+    def _render_pools(
+        self, graph: WorkflowGraph, opts: RenderOptions, crit_set: set[str]
+    ) -> list[str]:
         """Groups nodes into subgraphs by execution pool."""
         pool_nodes: dict[str, list[GraphNode]] = {}
         for node in graph.nodes.values():
@@ -142,19 +150,22 @@ class DotGraphRendererAdapter(GraphRendererPort):
         lines: list[str] = []
         for cluster_idx, (pool_name, nodes) in enumerate(pool_nodes.items()):
             lines.append(f'    subgraph "cluster_{cluster_idx}" {{')
-            lines.append(f'        label="Pool: {pool_name}";')
+            lines.append(f'        label="Pool: {_dot_escape(pool_name)}";')
             lines.append('        style="dashed,rounded";')
             lines.append('        color="#b0bec5";')
             lines.append('        bgcolor="#f8f9fa";')
             for node in nodes:
-                lines.append(f"        {self._render_node(node, opts)};")
+                lines.append(f"        {self._render_node(node, opts, crit_set)};")
             lines.append("    }")
         return lines
 
-    def _render_node(self, node: GraphNode, opts: RenderOptions) -> str:
+    def _render_node(
+        self, node: GraphNode, opts: RenderOptions, crit_set: set[str] | None = None
+    ) -> str:
         """Formats a single node definition with colors and label."""
+        crit = crit_set if crit_set is not None else set()
         is_highlighted = node.step_id in opts.highlight_node_ids or (
-            opts.highlight_critical_path and node.is_critical_path
+            opts.highlight_critical_path and node.step_id in crit
         )
 
         fillcolor = "#e3f2fd"
@@ -174,9 +185,9 @@ class DotGraphRendererAdapter(GraphRendererPort):
             if node.step.estimated_duration_seconds > 0
             else ""
         )
-        label = f"{node.step_id}{effects}{rule_label}{duration}"
+        label = _dot_escape(f"{node.step_id}{effects}{rule_label}{duration}")
 
-        return f'"{node.step_id}" [label="{label}", fillcolor="{fillcolor}", color="{color}", penwidth={"2.0" if is_highlighted else "1.0"}]'
+        return f'"{_dot_escape(node.step_id)}" [label="{label}", fillcolor="{fillcolor}", color="{color}", penwidth={"2.0" if is_highlighted else "1.0"}]'
 
     def _extract_critical_path_edges(
         self,

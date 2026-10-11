@@ -1039,3 +1039,51 @@ def test_engine_rewind_and_replay() -> None:
     assert step_counts["s1"] == 1  # Unchanged / skipped
     assert step_counts["s2"] == 2  # Re-executed
     assert step_counts["s3"] == 2  # Re-executed downstream
+
+
+def test_mapped_step_simulation_side_effects_and_mock() -> None:
+    """Validate mapped steps observe dry_run, side_effects guards, and mock fallbacks."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    real_executed: list[int] = []
+
+    def mutating_action(item: int) -> int:
+        real_executed.append(item)
+        return item * 10
+
+    mapped_step = StepDefinition(
+        name="process_items",
+        action=mutating_action,
+        is_mapped=True,
+        map_over="items",
+        side_effects=True,
+    )
+    wf_unsafe = WorkflowDefinition(
+        name="mapped_unsafe_wf",
+        stages=(StageDefinition(name="stg", steps=(mapped_step,)),),
+    )
+
+    # In dry-run without mock or allow_unsafe, execution suspends with DryRunUnsafeStepError
+    unsafe_res = engine.run(wf_unsafe, initial_inputs={"items": [1, 2]}, dry_run=True)
+    assert unsafe_res.status == WorkflowStatus.SUSPENDED
+    assert "DryRunUnsafeStepError" in (unsafe_res.error_summary or "")
+    assert real_executed == []
+
+    # With mock fallback
+    mapped_mock = StepDefinition(
+        name="process_items_mocked",
+        action=mutating_action,
+        is_mapped=True,
+        map_over="items",
+        side_effects=True,
+        dry_run=lambda item: item * 99,
+    )
+    wf_mocked = WorkflowDefinition(
+        name="mapped_mocked_wf",
+        stages=(StageDefinition(name="stg", steps=(mapped_mock,)),),
+    )
+    sim_res = engine.run(wf_mocked, initial_inputs={"items": [1, 2]}, dry_run=True)
+    assert sim_res.status == WorkflowStatus.COMPLETED
+    assert real_executed == []  # Real action was not invoked
+    assert sim_res.step_checkpoints["process_items_mocked"].output_payload == [99, 198]

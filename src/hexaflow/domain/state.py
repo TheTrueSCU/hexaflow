@@ -6,12 +6,13 @@ Notes/Architectural Intent:
     and JSON formats for SQLite and remote persistence.
 """
 
+import copy
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class WorkflowStatus(StrEnum):
@@ -139,6 +140,9 @@ class WorkflowExecutionState(BaseModel):
         default_factory=lambda: datetime.now(UTC), description="Run start timestamp."
     )
     finished_at: datetime | None = Field(default=None, description="Run terminal timestamp.")
+    is_dry_run: bool = Field(
+        default=False, description="Whether this run was executed in dry_run simulation mode."
+    )
 
     def to_memento(self) -> "WorkflowMemento":
         """Capture an immutable point-in-time snapshot memento of this execution state.
@@ -155,6 +159,8 @@ class WorkflowExecutionState(BaseModel):
             current_stage=self.current_stage,
             step_checkpoints=copy.deepcopy(self.step_checkpoints),
             initial_inputs=copy.deepcopy(self.initial_inputs),
+            started_at=self.started_at,
+            finished_at=self.finished_at,
             error_summary=self.error_summary,
             created_at=datetime.now(UTC),
         )
@@ -179,6 +185,8 @@ class WorkflowExecutionState(BaseModel):
         self.current_stage = memento.current_stage
         self.step_checkpoints = copy.deepcopy(memento.step_checkpoints)
         self.initial_inputs = copy.deepcopy(memento.initial_inputs)
+        self.started_at = memento.started_at
+        self.finished_at = memento.finished_at
         self.error_summary = memento.error_summary
 
     def rewind_to(
@@ -238,11 +246,25 @@ class WorkflowMemento(BaseModel):
         default_factory=dict,
         description="Initial inputs supplied to run.",
     )
+    started_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Run start timestamp at capture time.",
+    )
+    finished_at: datetime | None = Field(
+        default=None,
+        description="Run finished timestamp at capture time.",
+    )
     error_summary: str | None = Field(default=None, description="Error summary at capture time.")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="Timestamp when memento was created.",
     )
+
+    @field_validator("step_checkpoints", "initial_inputs", mode="before")
+    @classmethod
+    def _defensive_deepcopy(cls, v: Any) -> Any:
+        """Enforces deep immutability by copying input dictionary structures."""
+        return copy.deepcopy(v)
 
 
 __all__ = [

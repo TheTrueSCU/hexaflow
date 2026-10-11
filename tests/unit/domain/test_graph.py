@@ -182,6 +182,29 @@ def test_critical_path_and_duration() -> None:
     assert duration == 11.0
 
 
+def test_critical_path_zero_duration_parents() -> None:
+    """Test critical path preservation when parents have 0.0 estimated duration."""
+    s1 = StepDefinition(name="root", action=dummy_action, estimated_duration_seconds=0.0)
+    s2 = StepDefinition(
+        name="child",
+        action=dummy_action,
+        depends_on=("root",),
+        estimated_duration_seconds=0.0,
+    )
+    wf = WorkflowDefinition(
+        name="zero_dur",
+        stages=(
+            StageDefinition(name="s1", steps=(s1,)),
+            StageDefinition(name="s2", steps=(s2,)),
+        ),
+    )
+    graph = WorkflowGraph.from_workflow(wf)
+    crit_path = graph.critical_path()
+    assert crit_path == ["root", "child"]
+    dur = graph.critical_path_duration()
+    assert dur == 0.0
+
+
 def test_roots_leaves_and_topological_steps() -> None:
     """Test querying roots, leaves, and topological step definitions."""
     wf = create_sample_workflow()

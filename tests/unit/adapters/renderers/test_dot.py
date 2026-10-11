@@ -114,3 +114,21 @@ def test_dot_render_image_failure() -> None:
         with pytest.raises(RuntimeError) as exc_info:
             adapter.render_image(graph, "png")
         assert "Graphviz 'dot' failed with exit code 1" in str(exc_info.value)
+
+
+def test_dot_render_escaping() -> None:
+    """Validate that special characters and quotes in step names are properly escaped."""
+    s1 = StepDefinition(name='step "one"', action=dummy)
+    s2 = StepDefinition(name="step\\two", action=dummy, depends_on=('step "one"',))
+    wf = WorkflowDefinition(
+        name='flow "main"',
+        stages=(
+            StageDefinition(name="s1", steps=(s1,)),
+            StageDefinition(name="s2", steps=(s2,)),
+        ),
+    )
+    graph = WorkflowGraph.from_workflow(wf)
+    adapter = DotGraphRendererAdapter()
+    output = adapter.render(graph)
+    assert 'digraph "flow \\"main\\""' in output
+    assert '"step \\"one\\"" -> "step\\\\two"' in output

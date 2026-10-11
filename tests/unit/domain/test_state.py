@@ -91,7 +91,10 @@ def test_workflow_memento_capture_and_restore() -> None:
 
     from hexaflow.domain.state import WorkflowMemento
 
-    state = WorkflowExecutionState(workflow_name="checkout_flow")
+    state = WorkflowExecutionState(
+        workflow_name="checkout_flow",
+        initial_inputs={"cart_id": "cart-123"},
+    )
     chk = CheckpointRecord(
         run_id=state.run_id,
         stage_name="cart",
@@ -106,6 +109,12 @@ def test_workflow_memento_capture_and_restore() -> None:
     assert isinstance(memento, WorkflowMemento)
     assert memento.run_id == state.run_id
     assert "validate_cart" in memento.step_checkpoints
+    assert memento.started_at == state.started_at
+    assert memento.finished_at == state.finished_at
+
+    # Verify immutability of memento against mutation of source or nested models
+    state.initial_inputs["cart_id"] = "mutated_cart"
+    assert memento.initial_inputs["cart_id"] == "cart-123"
 
     # Mutate state
     state.step_checkpoints["charge"] = CheckpointRecord(
@@ -115,12 +124,15 @@ def test_workflow_memento_capture_and_restore() -> None:
         status=StepStatus.FAILED,
     )
     state.status = WorkflowStatus.SUSPENDED
+    state.finished_at = datetime.now(UTC)
 
     # Restore
     state.restore_from_memento(memento)
     assert state.status == WorkflowStatus.RUNNING
     assert "charge" not in state.step_checkpoints
     assert "validate_cart" in state.step_checkpoints
+    assert state.initial_inputs["cart_id"] == "cart-123"
+    assert state.finished_at is None
 
     # Mismatch run_id raises ValueError
     foreign_memento = WorkflowMemento(

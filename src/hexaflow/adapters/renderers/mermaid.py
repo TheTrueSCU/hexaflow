@@ -18,7 +18,7 @@ from hexaflow.domain.graph import (
     GraphNode,
     WorkflowGraph,
 )
-from hexaflow.domain.models import TriggerRule
+from hexaflow.domain.models import TriggerRule, _mermaid_node_id
 from hexaflow.ports.renderer import (
     GraphRendererPort,
     RenderOptions,
@@ -73,7 +73,7 @@ class MermaidGraphRendererAdapter(GraphRendererPort):
 
         lines.append("")
         for source_id, target_id in graph.edges:
-            lines.append(f"    {source_id} --> {target_id}")
+            lines.append(f"    {_mermaid_node_id(source_id)} --> {_mermaid_node_id(target_id)}")
 
         lines.append("")
         lines.extend(self._render_styles(graph, opts, critical_path_set))
@@ -151,8 +151,10 @@ class MermaidGraphRendererAdapter(GraphRendererPort):
             if node.trigger_rule != TriggerRule.ALL_SUCCESS
             else ""
         )
-        label = f'"{node.step_id}{effects}{rule}"'
-        return f"{node.step_id}[{label}]"
+        safe_id = _mermaid_node_id(node.step_id)
+        escaped_label = node.step_id.replace('"', "#quot;")
+        label = f'"{escaped_label}{effects}{rule}"'
+        return f"{safe_id}[{label}]"
 
     def _render_styles(
         self,
@@ -167,12 +169,12 @@ class MermaidGraphRendererAdapter(GraphRendererPort):
             "    classDef critical fill:#ffebee,stroke:#d32f2f,stroke-width:3px,color:#b71c1c;",
         ]
 
-        crit_nodes = [nid for nid in graph.nodes if nid in critical_path_set]
+        crit_nodes = [_mermaid_node_id(nid) for nid in graph.nodes if nid in critical_path_set]
         if crit_nodes:
             lines.append(f"    class {','.join(crit_nodes)} critical;")
 
         highlight_nodes = [
-            nid
+            _mermaid_node_id(nid)
             for nid in graph.nodes
             if nid in opts.highlight_node_ids and nid not in critical_path_set
         ]

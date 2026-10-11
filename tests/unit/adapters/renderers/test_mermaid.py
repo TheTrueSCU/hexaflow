@@ -110,3 +110,23 @@ def test_mermaid_render_image_failure() -> None:
         with pytest.raises(RuntimeError) as exc_info:
             adapter.render_image(graph, "png")
         assert "Mermaid CLI 'mmdc' failed with exit code 1" in str(exc_info.value)
+
+
+def test_mermaid_render_id_sanitization() -> None:
+    """Validate that node names with spaces and reserved tokens produce legal Mermaid syntax."""
+    s1 = StepDefinition(name='step one "test"', action=dummy)
+    s2 = StepDefinition(name="end", action=dummy, depends_on=('step one "test"',))
+    wf = WorkflowDefinition(
+        name="flow",
+        stages=(
+            StageDefinition(name="s1", steps=(s1,)),
+            StageDefinition(name="s2", steps=(s2,)),
+        ),
+    )
+    graph = WorkflowGraph.from_workflow(wf)
+    adapter = MermaidGraphRendererAdapter()
+    output = adapter.render(graph)
+    assert "step_one__test_" in output
+    assert "end" in output
+    assert "step_one__test_ --> end" in output
+    assert "#quot;" in output
