@@ -52,43 +52,8 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Visualize Planned Workflow DAG
-        run: |
-          uv run python -c "
-          import os
-          from hexaflow import Workflow
+        run: uv run python .github/scripts/visualize_ci_dag.py
 
-          # Model CI pipeline as a declarative hexaflow Workflow DAG
-          wf = Workflow('ci_pipeline')
-
-          @wf.stage('quality')
-          @wf.step('quality_gate')
-          def quality_gate(ctx): return 'ok'
-
-          @wf.stage('test')
-          @wf.step('test_suite', depends_on=['quality_gate'])
-          def test_suite(ctx): return 'ok'
-
-          @wf.stage('verification')
-          @wf.step('hypothesis_fuzzing', depends_on=['test_suite'])
-          def hypothesis_fuzzing(ctx): return 'ok'
-
-          @wf.step('mutation_verification', depends_on=['test_suite'])
-          def mutation_verification(ctx): return 'ok'
-
-          @wf.stage('gate')
-          @wf.step('ci_success', depends_on=['hypothesis_fuzzing', 'mutation_verification'])
-          def ci_success(ctx): return 'ok'
-
-          mermaid = wf.render('mermaid')
-
-          summary_path = os.environ.get('GITHUB_STEP_SUMMARY')
-          if summary_path:
-              with open(summary_path, 'a', encoding='utf-8') as f:
-                  f.write('### 🗺️ Planned Hexaflow CI Workflow Execution Plan\n\n')
-                  f.write('```mermaid\n')
-                  f.write(mermaid)
-                  f.write('```\n')
-          "
 
       - name: Run Unit & Integration Tests
         run: uv run hexaqual test run -U --cov=src/hexaflow --cov-report=xml --cov-report=term-missing --junitxml=junit.xml -o junit_family=legacy
