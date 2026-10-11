@@ -5,7 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-11
+
+### Added
+- **Pluggable Graph Subsystem & Multi-Format Renderers**:
+  - `WorkflowGraph` pure domain model with cycle detection, topological sorting, reachability analysis (`ancestors`, `descendants`, `blast_radius`), and critical path latency bottleneck calculation.
+  - Multi-format diagram adapters conforming to `GraphRendererPort`:
+    - `MermaidGraphRenderer`: Stage-clustered flowcharts with execution pool styling, rule badges, and mapped indicators.
+    - `DotGraphRenderer`: Graphviz DOT format with customizable styles and node highlighting.
+    - `AsciiGraphRenderer`: Unicode box-drawing visual DAG representation for terminal output.
+    - `JsonGraphRenderer`: JSON-serialized structural representation for programmatic integration.
+    - `RendererRegistry`: Extensible renderer catalog supporting third-party format plugins.
+  - Optional visual artifact export (`render_image(..., image_format="svg" | "png")`) with CLI fallbacks (`mmdc`, `dot`).
+- **Dry-Run Simulation Mode & Chaos Fault Injection**:
+  - `dry_run=True` simulation execution across scalar and mapped fan-out steps without mutating databases or external APIs.
+  - Fail-closed safety guards: steps declaring `side_effects=True` require explicit mock fallbacks (`dry_run=...`) or `allow_unsafe=True`, preventing unintended production mutations.
+  - Chaos fault injection: `fault_injection={step_name: Exception}` parameter allows simulating component failures and testing resilient compensating workflows.
+- **Workflow Memento Pattern & Time-Travel Rewind**:
+  - Immutable state snapshots (`WorkflowMemento`) capturing complete execution state, checkpoints, and inputs.
+  - Time-travel execution rewind (`rewind_to(step_name)`): resets execution to before any historical step, clearing downstream checkpoints for selective re-execution.
+- **Onion-Layered Step Middleware Pipeline**:
+  - Abstract `StepMiddlewarePort` protocol and `InOutStepMiddleware` base class for pre/post step interception across sync and async callables.
+  - Built-in middleware implementations:
+    - `LoggingStepMiddleware`: Structured logging of step start, completion, and failure events.
+    - `TimingStepMiddleware`: High-precision latency measurement in milliseconds stored on step context metadata.
+    - `MockFallbackMiddleware`: Automatic synthetic fallback generation for dry-run simulation mode.
+  - Fluent registration via `engine.use(middleware)` and `Workflow(..., middleware=[...])`.
+- **Enhanced CLI Subcommands (`hf graph render` & `hf graph info`)**:
+  - `hf graph render <target> --format <mermaid|dot|ascii|json>`: Visualizes workflow DAGs directly from Python files, functions, or GitHub Actions YAML files.
+  - Direct GitHub Actions YAML pipeline parsing (`GitHubActionsYamlLoader`): parses job dependencies (`needs`) into a `WorkflowGraph` without custom scripts.
+  - `--dry-run` simulation flag on `hf graph render` to expand and visualize dynamic mapped steps before execution.
+  - `--summary`: writes rendered Mermaid diagrams directly to GitHub Actions `$GITHUB_STEP_SUMMARY`.
+  - `hf graph info <target>`: Displays topological metadata, estimated latency, bottleneck step, and critical path nodes.
+
+### Changed
+- Refactored `AsyncioWorkflowEngine` execution pipeline into an onion-layered middleware dispatch chain.
+- Constructor worker limits (`max_process_workers`, `max_thread_workers`) on `Workflow` retain original positional parameter ordering.
+
 ## [0.4.0] - 2026-09-25
+
 
 ### Added
 - **Multi-Core Worker Pools & Execution Pools (`ExecutionPool`)**:
