@@ -13,5 +13,6 @@ from hexaflow.ports.storage import WorkflowStateStorePort
 
 def test_cannot_instantiate_abstract_storage_port() -> None:
     """Validate that direct instantiation of WorkflowStateStorePort raises TypeError."""
-    with pytest.raises(TypeError):
-        WorkflowStateStorePort()  # type: ignore[abstract]
+    port_cls: type[WorkflowStateStorePort] = WorkflowStateStorePort
+    with pytest.raises(TypeError, match="Can't instantiate abstract class"):
+        port_cls.__new__(port_cls)
