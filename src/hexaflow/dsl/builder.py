@@ -140,9 +140,9 @@ class Workflow:
         description: str = "",
         state_store: WorkflowStateStorePort | None = None,
         engine: WorkflowEnginePort | None = None,
-        middleware: Sequence[StepMiddlewarePort] | None = None,
         max_process_workers: int | None = None,
         max_thread_workers: int | None = None,
+        middleware: Sequence[StepMiddlewarePort] | None = None,
     ) -> None:
         """Initialize a new Workflow builder.
 
@@ -152,9 +152,9 @@ class Workflow:
             description: Architectural intent or business summary.
             state_store: Persistence store for checkpoints. Defaults to SqliteStateStore.
             engine: Execution engine. Defaults to AsyncioWorkflowEngine.
-            middleware: Optional sequence of StepMiddlewarePort pipeline interceptors.
             max_process_workers: Maximum child processes allocated for ExecutionPool.PROCESS.
             max_thread_workers: Maximum worker threads allocated for ExecutionPool.THREAD.
+            middleware: Optional sequence of StepMiddlewarePort pipeline interceptors.
         """
         self.name = name
         self.version = version

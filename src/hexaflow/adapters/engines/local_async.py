@@ -1051,8 +1051,12 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
             if step.name in faults:
                 raise faults[step.name]
 
+            effective_item = c.inputs.get("item", item)
+
             if not dry_run:
-                return await self._invoke_mapped_callable(step.action, item, c, pool=step.pool)
+                return await self._invoke_mapped_callable(
+                    step.action, effective_item, c, pool=step.pool
+                )
 
             if step.side_effects and not allow_unsafe:
                 if step.dry_run is None:
@@ -1063,18 +1067,20 @@ class AsyncioWorkflowEngine(WorkflowEnginePort):
                     )
                 if callable(step.dry_run):
                     return await self._invoke_mapped_callable(
-                        step.dry_run, item, c, pool=ExecutionPool.ASYNC
+                        step.dry_run, effective_item, c, pool=ExecutionPool.ASYNC
                     )
                 return step.dry_run
 
             if step.dry_run is not None:
                 if callable(step.dry_run):
                     return await self._invoke_mapped_callable(
-                        step.dry_run, item, c, pool=ExecutionPool.ASYNC
+                        step.dry_run, effective_item, c, pool=ExecutionPool.ASYNC
                     )
                 return step.dry_run
 
-            return await self._invoke_mapped_callable(step.action, item, c, pool=step.pool)
+            return await self._invoke_mapped_callable(
+                step.action, effective_item, c, pool=step.pool
+            )
 
         dispatch_coro = self._execute_with_middleware(ctx, _target_mapped_action)
         if step.timeout_seconds:

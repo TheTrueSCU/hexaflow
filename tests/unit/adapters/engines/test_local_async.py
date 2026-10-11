@@ -1222,3 +1222,35 @@ def test_engine_middleware_wraps_step_timeout() -> None:
     res = engine.run(wf)
     assert res.status == WorkflowStatus.SUSPENDED
     assert "TimeoutError" in (res.error_summary or "")
+
+
+def test_mapped_sub_step_middleware_modifies_item() -> None:
+    """Validate that middleware mutating ctx.inputs['item'] propagates to mapped action."""
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    class ItemDoublerMiddleware:
+        def __call__(self, ctx: StepContext, next_call: Any) -> Any:
+            if "item" in ctx.inputs:
+                ctx.inputs["item"] = ctx.inputs["item"] * 2
+            return next_call(ctx)
+
+    engine.use(ItemDoublerMiddleware())
+
+    step = StepDefinition(
+        name="echo_item",
+        action=lambda item: item + 1,
+        is_mapped=True,
+        map_over="nums",
+    )
+    wf = WorkflowDefinition(
+        name="mapped_mutate_wf",
+        stages=(StageDefinition(name="stg", steps=(step,)),),
+    )
+
+    res = engine.run(wf, initial_inputs={"nums": [10, 20]})
+    status = res.status
+    assert status == WorkflowStatus.COMPLETED
+    output = res.step_checkpoints["echo_item"].output_payload
+    # If item was modified from 10->20 and 20->40 by middleware, action computes item + 1: [21, 41]
+    assert output == [21, 41]
