@@ -87,6 +87,15 @@ class WorkflowStateStorePort(ABC):
             retaining stale completed step checkpoints.
         """
 
+    @abstractmethod
+    def delete_checkpoint(self, run_id: str, step_name: str) -> None:
+        """Delete an individual step checkpoint during rewind operations.
+
+        Args:
+            run_id: Parent workflow execution ID.
+            step_name: Step name whose checkpoint should be removed.
+        """
+
 
 __all__ = [
     "WorkflowStateStorePort",

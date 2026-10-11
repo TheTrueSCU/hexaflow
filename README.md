@@ -32,6 +32,9 @@
 ### Key Features
 * **Hierarchical Execution**: Workflows structured cleanly into **Stages** and **Steps**.
 * **DAG Splits & Joins**: Concurrently fan-out (split) and synchronize at barrier dependencies (join).
+* **Pluggable Graph Analysis & Multi-Format Renderers**: Structural reachability (`ancestors`, `descendants`, `blast_radius`), critical path latency bottleneck calculation, and export to Mermaid, Graphviz DOT, ASCII, JSON, SVG, and PNG.
+* **Dry-Run Simulation Mode**: Simulate workflows safely with synthetic mocks (`dry_run=...`), side-effect fail-closed guards (`side_effects=True`, `allow_unsafe`), and chaos fault injection without mutating databases or external APIs.
+* **Workflow Memento & Time-Travel Rewind**: Capture immutable state mementos (`to_memento()`, `restore_from_memento()`), rewind execution to before any historical step (`rewind_to()`), and replay downstream dependencies seamlessly.
 * **Fault Partitioning**: Transient retries with exponential backoff vs. permanent failure suspension (`SUSPENDED`).
 * **Checkpointed Resumption**: Automatically saves step inputs and outputs into an embedded SQLite store. Resume failed workflows from the point of failure without re-running completed steps.
 * **Dual DSL**: Decorator-based syntax for Pythonic simplicity (`@wf.stage`, `@wf.step`) alongside declarative classes for programmatic pipelines.
@@ -109,15 +112,30 @@ hf status <run_id>
 # Inspect step inputs, outputs, or error tracebacks
 hf inspect <run_id> create_shipping_label
 
+# Visualize workflow DAG (Mermaid, DOT, ASCII, JSON)
+hf graph render examples/order_pipeline.py:wf --format mermaid
+
+# Render a GitHub Actions workflow DAG directly
+hf graph render .github/workflows/ci.yml --format mermaid
+
+# Simulate dynamic workflows in-memory and render materialized DAG
+hf graph render pipelines/ci.py:make_pipeline --dry-run --params '{"affected": ["core"]}'
+
+# Display topological metrics, critical path, and estimated latency
+hf graph info examples/order_pipeline.py:wf
+
 # Resume a suspended workflow from its latest checkpoint
-hf resume <run_id>
+hf resume <run_id> examples/order_pipeline.py:wf
 
 # Clear checkpoints and restart a workflow from scratch
-hf restart <run_id>
+hf restart <run_id> examples/order_pipeline.py:wf
 
 # Abort a workflow and execute compensating rollback actions
-hf abort <run_id>
+hf abort <run_id> examples/order_pipeline.py:wf
 ```
+
+> 📖 **Full Command Catalog**: See [**`USAGE.md`**](USAGE.md) for the complete CLI subcommand options, arguments, and formatting flags.
+
 
 ---
 

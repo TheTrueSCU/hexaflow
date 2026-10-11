@@ -26,6 +26,9 @@ class WorkflowEnginePort(ABC):
         workflow: WorkflowDefinition,
         initial_inputs: dict[str, Any] | None = None,
         skip_steps: set[str] | list[str] | None = None,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> WorkflowExecutionState:
         """Synchronously execute a workflow definition from start to finish.
 
@@ -33,6 +36,9 @@ class WorkflowEnginePort(ABC):
             workflow: Immutable specification of the workflow DAG.
             initial_inputs: Optional dictionary of input arguments passed to root steps.
             skip_steps: Optional collection of step names to explicitly skip.
+            dry_run: When True, simulates workflow execution without running side-effecting steps.
+            allow_unsafe: When True in dry_run mode, executes side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
 
         Returns:
             Final or suspended WorkflowExecutionState outcome.
@@ -44,6 +50,9 @@ class WorkflowEnginePort(ABC):
         workflow: WorkflowDefinition,
         initial_inputs: dict[str, Any] | None = None,
         skip_steps: set[str] | list[str] | None = None,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> WorkflowExecutionState:
         """Asynchronously execute a workflow definition from start to finish.
 
@@ -51,6 +60,9 @@ class WorkflowEnginePort(ABC):
             workflow: Immutable specification of the workflow DAG.
             initial_inputs: Optional dictionary of input arguments passed to root steps.
             skip_steps: Optional collection of step names to explicitly skip.
+            dry_run: When True, simulates workflow execution without running side-effecting steps.
+            allow_unsafe: When True in dry_run mode, executes side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
 
         Returns:
             Final or suspended WorkflowExecutionState outcome.
@@ -94,6 +106,50 @@ class WorkflowEnginePort(ABC):
 
         Returns:
             Updated WorkflowExecutionState outcome.
+        """
+
+    @abstractmethod
+    def rewind(
+        self,
+        run_id: str,
+        workflow: WorkflowDefinition,
+        to_step: str,
+        patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
+    ) -> WorkflowExecutionState:
+        """Synchronously rewind execution state to before a step and resume.
+
+        Args:
+            run_id: Execution identifier of the workflow run to rewind.
+            workflow: WorkflowDefinition specification matching the run.
+            to_step: The target step to rewind before.
+            patch_inputs: Optional override inputs for the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip.
+
+        Returns:
+            Updated WorkflowExecutionState outcome following replay.
+        """
+
+    @abstractmethod
+    async def rewind_async(
+        self,
+        run_id: str,
+        workflow: WorkflowDefinition,
+        to_step: str,
+        patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
+    ) -> WorkflowExecutionState:
+        """Asynchronously rewind execution state to before a step and resume.
+
+        Args:
+            run_id: Execution identifier of the workflow run to rewind.
+            workflow: WorkflowDefinition specification matching the run.
+            to_step: The target step to rewind before.
+            patch_inputs: Optional override inputs for the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip.
+
+        Returns:
+            Updated WorkflowExecutionState outcome following replay.
         """
 
     @abstractmethod

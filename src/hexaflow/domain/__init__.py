@@ -7,13 +7,19 @@ Notes/Architectural Intent:
 
 from hexaflow.domain.exceptions import (
     CheckpointCorruptError,
+    DryRunUnsafeStepError,
     DuplicateStepError,
     InvalidWorkflowDAGError,
+    RendererToolNotFoundError,
     StepFailedError,
     StepNotFoundError,
     WorkflowAborted,
     WorkflowError,
     WorkflowSuspended,
+)
+from hexaflow.domain.graph import (
+    GraphNode,
+    WorkflowGraph,
 )
 from hexaflow.domain.models import (
     ExecutionPool,
@@ -31,6 +37,7 @@ from hexaflow.domain.state import (
     StepContext,
     StepStatus,
     WorkflowExecutionState,
+    WorkflowMemento,
     WorkflowStatus,
 )
 
@@ -38,9 +45,12 @@ __all__ = [
     "BackoffType",
     "CheckpointCorruptError",
     "CheckpointRecord",
+    "DryRunUnsafeStepError",
     "DuplicateStepError",
     "ExecutionPool",
+    "GraphNode",
     "InvalidWorkflowDAGError",
+    "RendererToolNotFoundError",
     "RetryPolicy",
     "StageDefinition",
     "StageExecutionMode",
@@ -53,6 +63,8 @@ __all__ = [
     "WorkflowDefinition",
     "WorkflowError",
     "WorkflowExecutionState",
+    "WorkflowGraph",
+    "WorkflowMemento",
     "WorkflowStatus",
     "WorkflowSuspended",
 ]

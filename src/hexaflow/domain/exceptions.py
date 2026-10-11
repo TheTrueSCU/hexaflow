@@ -115,10 +115,30 @@ class CheckpointCorruptError(WorkflowError):
     """
 
 
+class DryRunUnsafeStepError(WorkflowError):
+    """Raised when a step with side effects is executed in dry-run mode without a mock.
+
+    Notes/Architectural Intent:
+        Enforces fail-closed safety during simulation: any mutating step without
+        an explicit dry_run mock callable or value aborts before executing.
+    """
+
+
+class RendererToolNotFoundError(WorkflowError):
+    """Raised when an external CLI compiler (e.g. Graphviz 'dot' or Mermaid 'mmdc') is missing.
+
+    Notes/Architectural Intent:
+        Provides clear, actionable remediation messages when users request raster or
+        vector image rendering without the required external compiler in PATH.
+    """
+
+
 __all__ = [
     "CheckpointCorruptError",
+    "DryRunUnsafeStepError",
     "DuplicateStepError",
     "InvalidWorkflowDAGError",
+    "RendererToolNotFoundError",
     "StepFailedError",
     "StepNotFoundError",
     "WorkflowAborted",

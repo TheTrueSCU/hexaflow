@@ -161,6 +161,19 @@ class StepDefinition(BaseModel):
     description: str = Field(
         default="", description="Architectural or business description of the step."
     )
+    side_effects: bool = Field(
+        default=False,
+        description="True if step mutates external state (databases, APIs, filesystem).",
+    )
+    dry_run: Any | None = Field(
+        default=None,
+        description="Mock return value or mock callable for dry-run simulation mode.",
+    )
+    estimated_duration_seconds: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Estimated execution duration in seconds for critical path analysis.",
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Arbitrary execution metadata (e.g. cluster resources, hardware requirements, tags).",
