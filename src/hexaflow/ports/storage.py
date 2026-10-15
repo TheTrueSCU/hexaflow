@@ -75,6 +75,27 @@ class WorkflowStateStorePort(ABC):
             List of all CheckpointRecords recorded for this run, ordered by creation.
         """
 
+    @abstractmethod
+    def clear_checkpoints(self, run_id: str) -> None:
+        """Clear all recorded step checkpoints for a workflow run upon restart.
+
+        Args:
+            run_id: Parent workflow execution ID.
+
+        Notes/Architectural Intent:
+            Enables full re-execution from scratch during restart_async without
+            retaining stale completed step checkpoints.
+        """
+
+    @abstractmethod
+    def delete_checkpoint(self, run_id: str, step_name: str) -> None:
+        """Delete an individual step checkpoint during rewind operations.
+
+        Args:
+            run_id: Parent workflow execution ID.
+            step_name: Step name whose checkpoint should be removed.
+        """
+
 
 __all__ = [
     "WorkflowStateStorePort",

@@ -10,13 +10,15 @@ The central container and DAG orchestrator.
 
 ```python
 from hexaflow import Workflow
+from hexaflow.ports.storage import WorkflowStateStorePort
+from hexaflow.ports.engine import WorkflowEnginePort
 
 wf = Workflow(
-    name: str,
-    version: str = "1.0.0",
-    description: str | None = None,
-    state_store: StateStorePort | None = None,
-    engine: WorkflowEnginePort | None = None,
+    name="my-workflow",
+    version="1.0.0",
+    description="Example workflow pipeline",
+    state_store=None,  # Defaults to SqliteStateStore()
+    engine=None,  # Defaults to AsyncioWorkflowEngine()
 )
 ```
 
@@ -37,13 +39,13 @@ Decorator grouping steps into a logical stage.
 #### `wf.compensate(target_step_name)`
 Decorator registering a rollback compensation handler for a previously executed step.
 
-#### `wf.run(initial_inputs=None) -> WorkflowStateSnapshot`
+#### `wf.run(initial_inputs=None) -> WorkflowExecutionState`
 Executes the workflow from the beginning.
 
-* **`initial_inputs`** (`dict[str, Any] | None`): Global parameters passed to root steps via `ctx.inputs["__initial__"]`.
-* **Returns**: A `WorkflowStateSnapshot` containing the terminal execution status, run ID, and step checkpoints.
+* **`initial_inputs`** (`dict[str, Any] | None`): Initial inputs supplied to the workflow run.
+* **Returns**: A `WorkflowExecutionState` containing the terminal execution status, run ID, and step checkpoints.
 
-#### `wf.resume(run_id: str) -> WorkflowStateSnapshot`
+#### `wf.resume(run_id: str) -> WorkflowExecutionState`
 Resumes execution of a previously halted or failed workflow run using checkpoints from the configured state store.
 
 ---
@@ -55,9 +57,11 @@ Passed as the first argument (`ctx`) to all step and compensation functions.
 ### Attributes
 
 * **`ctx.inputs`** (`dict[str, Any]`): Dictionary mapping upstream step names to their return values.
+* **`ctx.output`** (`Any`): Output payload result of the step, available during compensation.
 * **`ctx.run_id`** (`str`): Unique execution run identifier.
+* **`ctx.stage_name`** (`str`): Name of the stage enclosing this step.
 * **`ctx.step_name`** (`str`): The name of the executing step.
-* **`ctx.metadata`** (`dict[str, Any]`): Arbitrary execution metadata.
+* **`ctx.attempt_number`** (`int`): Current retry attempt number (1-indexed).
 
 ---
 
@@ -111,11 +115,10 @@ store = InMemoryStateStore()
 Embedded ACID-compliant state storage with WAL journaling.
 
 ```python
-from pathlib import Path
 from hexaflow.adapters.storage.sqlite import SqliteStateStore
 
 store = SqliteStateStore(
-    db_path=Path("workflows.db"),
-    enable_wal=True,
+    db_path="workflows.db",
+    artifacts_dir=".hexaflow/artifacts",
 )
 ```

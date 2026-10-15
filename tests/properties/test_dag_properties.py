@@ -33,7 +33,9 @@ def test_topological_order_invariant(step_tuples: list[tuple[int, str]]) -> None
     stages_dict: dict[int, list[StepDefinition]] = {}
     prev_name: str | None = None
 
-    for stage_id, name in step_tuples:
+    # Sort by stage_id to guarantee stage ordering matches dependency chain
+    sorted_tuples = sorted(step_tuples, key=lambda x: x[0])
+    for stage_id, name in sorted_tuples:
         deps = (prev_name,) if prev_name else ()
         step = StepDefinition(name=name, action=lambda ctx: None, depends_on=deps)
         stages_dict.setdefault(stage_id, []).append(step)

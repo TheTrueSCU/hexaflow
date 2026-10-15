@@ -6,12 +6,17 @@ Notes/Architectural Intent:
     and delegating execution to WorkflowEnginePort.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from types import TracebackType
-from typing import Any
+from typing import (
+    Any,
+    Literal,
+)
 
 from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
+from hexaflow.adapters.renderers.registry import default_renderer_registry
 from hexaflow.adapters.storage.sqlite import SqliteStateStore
+from hexaflow.domain.graph import WorkflowGraph
 from hexaflow.domain.models import (
     ExecutionPool,
     StageDefinition,
@@ -23,6 +28,8 @@ from hexaflow.domain.models import (
 from hexaflow.domain.retry import RetryPolicy
 from hexaflow.domain.state import WorkflowExecutionState
 from hexaflow.ports.engine import WorkflowEnginePort
+from hexaflow.ports.middleware import StepMiddlewarePort
+from hexaflow.ports.renderer import RenderOptions
 from hexaflow.ports.storage import WorkflowStateStorePort
 
 
@@ -45,6 +52,9 @@ class _StepBuilder:
         map_over: str | None = None,
         concurrency_limit: int | None = None,
         pool: ExecutionPool = ExecutionPool.ASYNC,
+        side_effects: bool = False,
+        dry_run: Any | None = None,
+        estimated_duration_seconds: float = 1.0,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -61,6 +71,9 @@ class _StepBuilder:
         self.map_over = map_over
         self.concurrency_limit = concurrency_limit
         self.pool = pool
+        self.side_effects = side_effects
+        self.dry_run = dry_run
+        self.estimated_duration_seconds = estimated_duration_seconds
         self.description = description
         self.metadata = metadata or {}
 
@@ -79,6 +92,9 @@ class _StepBuilder:
             map_over=self.map_over,
             concurrency_limit=self.concurrency_limit,
             pool=self.pool,
+            side_effects=self.side_effects,
+            dry_run=self.dry_run,
+            estimated_duration_seconds=self.estimated_duration_seconds,
             description=self.description,
             metadata=self.metadata,
         )
@@ -126,6 +142,7 @@ class Workflow:
         engine: WorkflowEnginePort | None = None,
         max_process_workers: int | None = None,
         max_thread_workers: int | None = None,
+        middleware: Sequence[StepMiddlewarePort] | None = None,
     ) -> None:
         """Initialize a new Workflow builder.
 
@@ -137,6 +154,7 @@ class Workflow:
             engine: Execution engine. Defaults to AsyncioWorkflowEngine.
             max_process_workers: Maximum child processes allocated for ExecutionPool.PROCESS.
             max_thread_workers: Maximum worker threads allocated for ExecutionPool.THREAD.
+            middleware: Optional sequence of StepMiddlewarePort pipeline interceptors.
         """
         self.name = name
         self.version = version
@@ -148,9 +166,52 @@ class Workflow:
         self._store = state_store or SqliteStateStore()
         self._engine = engine or AsyncioWorkflowEngine(
             state_store=self._store,
+            middleware=middleware,
             max_process_workers=max_process_workers,
             max_thread_workers=max_thread_workers,
         )
+        if engine is not None and middleware:
+            for mw in middleware:
+                self.use(mw)
+
+    @property
+    def middleware(self) -> list[StepMiddlewarePort]:
+        """Return the sequence of configured step middlewares if supported by engine.
+
+        Returns:
+            List of registered StepMiddlewarePort instances.
+
+        Notes/Architectural Intent:
+            Delegates to underlying engine to retrieve configured step middleware interceptors.
+        """
+        raw_mw = getattr(self._engine, "middleware", None)
+        if isinstance(raw_mw, (list, tuple)):
+            return [m for m in raw_mw if isinstance(m, StepMiddlewarePort)]
+        return []
+
+    def use(self, middleware: StepMiddlewarePort) -> "Workflow":
+        """Register a step middleware interceptor into the execution engine.
+
+        Args:
+            middleware: StepMiddlewarePort instance intercepting step executions.
+
+        Returns:
+            Self for fluent chaining.
+
+        Raises:
+            TypeError: If the configured engine does not support middleware registration.
+
+        Notes/Architectural Intent:
+            Enables fluent registration wf.use(mw1).use(mw2) onto the configured engine.
+        """
+        use_fn = getattr(self._engine, "use", None)
+        if not callable(use_fn):
+            raise TypeError(
+                f"Workflow engine '{type(self._engine).__name__}' does not support "
+                "step middleware registration via use()."
+            )
+        use_fn(middleware)
+        return self
 
     def stage(
         self,
@@ -188,6 +249,9 @@ class Workflow:
         timeout_seconds: float | None = None,
         is_split: bool = False,
         pool: ExecutionPool = ExecutionPool.ASYNC,
+        side_effects: bool = False,
+        dry_run: Any | None = None,
+        estimated_duration_seconds: float = 1.0,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -204,6 +268,9 @@ class Workflow:
             timeout_seconds: Maximum execution time.
             is_split: True if step output fans out across workers.
             pool: Execution strategy (ASYNC, THREAD, PROCESS).
+            side_effects: True if step alters external databases/APIs/state.
+            dry_run: Mock value or callable executed during dry-run simulations.
+            estimated_duration_seconds: Estimated step duration for critical path analysis.
             description: Optional documentation of the step's operation.
             metadata: Arbitrary step metadata.
 
@@ -229,6 +296,9 @@ class Workflow:
                 timeout_seconds=timeout_seconds,
                 is_split=is_split,
                 pool=pool,
+                side_effects=side_effects,
+                dry_run=dry_run,
+                estimated_duration_seconds=estimated_duration_seconds,
                 description=description,
                 metadata=metadata,
             )
@@ -250,6 +320,9 @@ class Workflow:
         retries: RetryPolicy | None = None,
         compensation: Any | None = None,
         timeout_seconds: float | None = None,
+        side_effects: bool = False,
+        dry_run: Any | None = None,
+        estimated_duration_seconds: float = 1.0,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -300,6 +373,9 @@ class Workflow:
                 map_over=over,
                 concurrency_limit=concurrency_limit,
                 pool=pool,
+                side_effects=side_effects,
+                dry_run=dry_run,
+                estimated_duration_seconds=estimated_duration_seconds,
                 description=description,
                 metadata=metadata,
             )
@@ -351,6 +427,14 @@ class Workflow:
             description=self.description,
         )
 
+    def to_graph(self) -> WorkflowGraph:
+        """Construct a topological WorkflowGraph for structural and reachability analysis.
+
+        Returns:
+            Populated WorkflowGraph instance.
+        """
+        return WorkflowGraph.from_workflow(self.to_definition())
+
     def to_mermaid(self, direction: str = "TD") -> str:
         """Render the workflow DAG as a Mermaid flowchart definition.
 
@@ -370,39 +454,163 @@ class Workflow:
         """
         return self.to_definition().to_ascii()
 
+    def to_dot(self, options: RenderOptions | None = None) -> str:
+        """Render the workflow DAG as a Graphviz DOT digraph.
+
+        Args:
+            options: Optional RenderOptions configuration.
+
+        Returns:
+            Graphviz DOT specification string.
+        """
+        renderer = default_renderer_registry.get("dot")
+        return renderer.render(self.to_graph(), options=options)
+
+    def render(
+        self,
+        format_name: str = "mermaid",
+        options: RenderOptions | None = None,
+    ) -> str:
+        """Render the workflow graph using a registered renderer format.
+
+        Args:
+            format_name: Name of renderer format ('mermaid', 'dot', 'ascii', 'json').
+            options: Optional RenderOptions configuration.
+
+        Returns:
+            Rendered diagram or structured output string.
+        """
+        renderer = default_renderer_registry.get(format_name)
+        return renderer.render(self.to_graph(), options=options)
+
+    def render_image(
+        self,
+        format_name: str = "mermaid",
+        image_format: Literal["png", "svg"] = "svg",
+        options: RenderOptions | None = None,
+    ) -> bytes:
+        """Render the workflow graph to an image binary (PNG or SVG).
+
+        Args:
+            format_name: Target renderer engine ('mermaid' or 'dot').
+            image_format: Output image format ('png' or 'svg').
+            options: Optional RenderOptions configuration.
+
+        Returns:
+            Raw image bytes.
+
+        Raises:
+            RendererToolNotFoundError: If the underlying CLI compiler is not installed.
+            RuntimeError: If image compilation fails.
+        """
+        renderer = default_renderer_registry.get(format_name)
+        return renderer.render_image(self.to_graph(), image_format=image_format, options=options)
+
     def run(
         self,
         initial_inputs: dict[str, Any] | None = None,
         skip_steps: set[str] | list[str] | None = None,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> WorkflowExecutionState:
         """Synchronously execute the workflow from start to finish.
 
         Args:
             initial_inputs: Optional dictionary of inputs for root steps.
             skip_steps: Optional collection of step names to explicitly skip.
+            dry_run: When True, simulates workflow execution without running side-effecting steps.
+            allow_unsafe: When True in dry_run mode, executes side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
 
         Returns:
             Final or suspended WorkflowExecutionState.
         """
         definition = self.to_definition()
-        return self._engine.run(definition, initial_inputs, skip_steps=skip_steps)
+        return self._engine.run(
+            definition,
+            initial_inputs,
+            skip_steps=skip_steps,
+            dry_run=dry_run,
+            allow_unsafe=allow_unsafe,
+            fault_injection=fault_injection,
+        )
 
     async def run_async(
         self,
         initial_inputs: dict[str, Any] | None = None,
         skip_steps: set[str] | list[str] | None = None,
+        dry_run: bool = False,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
     ) -> WorkflowExecutionState:
         """Asynchronously execute the workflow from start to finish.
 
         Args:
             initial_inputs: Optional dictionary of inputs for root steps.
             skip_steps: Optional collection of step names to explicitly skip.
+            dry_run: When True, simulates workflow execution without running side-effecting steps.
+            allow_unsafe: When True in dry_run mode, executes side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
 
         Returns:
             Final or suspended WorkflowExecutionState.
         """
         definition = self.to_definition()
-        return await self._engine.run_async(definition, initial_inputs, skip_steps=skip_steps)
+        return await self._engine.run_async(
+            definition,
+            initial_inputs,
+            skip_steps=skip_steps,
+            dry_run=dry_run,
+            allow_unsafe=allow_unsafe,
+            fault_injection=fault_injection,
+        )
+
+    def simulate(
+        self,
+        initial_inputs: dict[str, Any] | None = None,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
+    ) -> WorkflowExecutionState:
+        """Convenience method to execute a dry-run simulation of the workflow.
+
+        Args:
+            initial_inputs: Optional dictionary of inputs for root steps.
+            allow_unsafe: When True, allows execution of side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
+
+        Returns:
+            Simulated WorkflowExecutionState.
+        """
+        return self.run(
+            initial_inputs=initial_inputs,
+            dry_run=True,
+            allow_unsafe=allow_unsafe,
+            fault_injection=fault_injection,
+        )
+
+    async def simulate_async(
+        self,
+        initial_inputs: dict[str, Any] | None = None,
+        allow_unsafe: bool = False,
+        fault_injection: dict[str, Exception] | None = None,
+    ) -> WorkflowExecutionState:
+        """Convenience coroutine to execute an asynchronous dry-run simulation.
+
+        Args:
+            initial_inputs: Optional dictionary of inputs for root steps.
+            allow_unsafe: When True, allows execution of side-effecting steps without mocks.
+            fault_injection: Optional mapping of step names to simulated Exceptions.
+
+        Returns:
+            Simulated WorkflowExecutionState.
+        """
+        return await self.run_async(
+            initial_inputs=initial_inputs,
+            dry_run=True,
+            allow_unsafe=allow_unsafe,
+            fault_injection=fault_injection,
+        )
 
     def resume(
         self,
@@ -442,6 +650,60 @@ class Workflow:
         definition = self.to_definition()
         return await self._engine.resume_async(
             run_id, definition, patch_inputs, skip_steps=skip_steps
+        )
+
+    def rewind(
+        self,
+        run_id: str,
+        to_step: str,
+        patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
+    ) -> WorkflowExecutionState:
+        """Synchronously rewind execution state to before a step and resume.
+
+        Args:
+            run_id: Execution identifier of the workflow run to rewind.
+            to_step: The target step to rewind before.
+            patch_inputs: Optional override inputs for the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip.
+
+        Returns:
+            Updated WorkflowExecutionState outcome following replay.
+        """
+        definition = self.to_definition()
+        return self._engine.rewind(
+            run_id=run_id,
+            workflow=definition,
+            to_step=to_step,
+            patch_inputs=patch_inputs,
+            skip_steps=skip_steps,
+        )
+
+    async def rewind_async(
+        self,
+        run_id: str,
+        to_step: str,
+        patch_inputs: dict[str, Any] | None = None,
+        skip_steps: set[str] | list[str] | None = None,
+    ) -> WorkflowExecutionState:
+        """Asynchronously rewind execution state to before a step and resume.
+
+        Args:
+            run_id: Execution identifier of the workflow run to rewind.
+            to_step: The target step to rewind before.
+            patch_inputs: Optional override inputs for the resuming step frontier.
+            skip_steps: Optional collection of step names to explicitly skip.
+
+        Returns:
+            Updated WorkflowExecutionState outcome following replay.
+        """
+        definition = self.to_definition()
+        return await self._engine.rewind_async(
+            run_id=run_id,
+            workflow=definition,
+            to_step=to_step,
+            patch_inputs=patch_inputs,
+            skip_steps=skip_steps,
         )
 
     def restart(self, run_id: str) -> WorkflowExecutionState:
@@ -507,6 +769,22 @@ class Workflow:
         from hexaflow.cli.binder import WorkflowCliBinder
 
         return WorkflowCliBinder(self, aliases=aliases)
+
+    def bind_store(self, state_store: WorkflowStateStorePort) -> None:
+        """Bind or replace the persistence state store and reconfigure engine.
+
+        Args:
+            state_store: Persistence store implementing WorkflowStateStorePort.
+
+        Raises:
+            TypeError: If the configured engine does not support binding a state store.
+        """
+        if not isinstance(self._engine, AsyncioWorkflowEngine):
+            raise TypeError(
+                f"Configured engine {type(self._engine).__name__} does not support binding a state store."
+            )
+        self._store = state_store
+        self._engine._store = state_store
 
     def close(self) -> None:
         """Shut down underlying engine resources and worker pools."""

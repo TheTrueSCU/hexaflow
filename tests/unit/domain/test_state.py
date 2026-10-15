@@ -83,3 +83,96 @@ def test_workflow_execution_state_lifecycle() -> None:
 
     curr_stage = state.current_stage
     assert curr_stage == "checkout"
+
+
+def test_workflow_memento_capture_and_restore() -> None:
+    """Validate to_memento snapshot capture and restore_from_memento restore."""
+    import pytest
+
+    from hexaflow.domain.state import WorkflowMemento
+
+    state = WorkflowExecutionState(
+        workflow_name="checkout_flow",
+        initial_inputs={"cart_id": "cart-123"},
+    )
+    chk = CheckpointRecord(
+        run_id=state.run_id,
+        stage_name="cart",
+        step_name="validate_cart",
+        status=StepStatus.COMPLETED,
+        output_payload={"valid": True},
+    )
+    state.step_checkpoints["validate_cart"] = chk
+    state.status = WorkflowStatus.RUNNING
+
+    memento = state.to_memento()
+    assert isinstance(memento, WorkflowMemento)
+    assert memento.run_id == state.run_id
+    assert "validate_cart" in memento.step_checkpoints
+    assert memento.started_at == state.started_at
+    assert memento.finished_at == state.finished_at
+
+    # Verify immutability of memento against mutation of source or nested models
+    state.initial_inputs["cart_id"] = "mutated_cart"
+    assert memento.initial_inputs["cart_id"] == "cart-123"
+
+    # Mutate state
+    state.step_checkpoints["charge"] = CheckpointRecord(
+        run_id=state.run_id,
+        stage_name="cart",
+        step_name="charge",
+        status=StepStatus.FAILED,
+    )
+    state.status = WorkflowStatus.SUSPENDED
+    state.finished_at = datetime.now(UTC)
+
+    # Restore
+    state.restore_from_memento(memento)
+    assert state.status == WorkflowStatus.RUNNING
+    assert "charge" not in state.step_checkpoints
+    assert "validate_cart" in state.step_checkpoints
+    assert state.initial_inputs["cart_id"] == "cart-123"
+    assert state.finished_at is None
+
+    # Mismatch run_id raises ValueError
+    foreign_memento = WorkflowMemento(
+        run_id="other_run_123",
+        workflow_name="checkout_flow",
+        status=WorkflowStatus.RUNNING,
+    )
+    with pytest.raises(ValueError, match="Cannot restore memento"):
+        state.restore_from_memento(foreign_memento)
+
+
+def test_workflow_execution_state_rewind_to() -> None:
+    """Validate rewind_to removes target and downstream checkpoints and resets status."""
+    state = WorkflowExecutionState(workflow_name="rewind_flow")
+    chk1 = CheckpointRecord(
+        run_id=state.run_id,
+        stage_name="s1",
+        step_name="step_a",
+        status=StepStatus.COMPLETED,
+    )
+    chk2 = CheckpointRecord(
+        run_id=state.run_id,
+        stage_name="s2",
+        step_name="step_b",
+        status=StepStatus.COMPLETED,
+    )
+    chk3 = CheckpointRecord(
+        run_id=state.run_id,
+        stage_name="s3",
+        step_name="step_c",
+        status=StepStatus.COMPLETED,
+    )
+    state.step_checkpoints["step_a"] = chk1
+    state.step_checkpoints["step_b"] = chk2
+    state.step_checkpoints["step_c"] = chk3
+    state.status = WorkflowStatus.COMPLETED
+
+    purged = state.rewind_to("step_b", downstream_steps={"step_c"})
+    assert purged == {"step_b", "step_c"}
+    assert "step_a" in state.step_checkpoints
+    assert "step_b" not in state.step_checkpoints
+    assert "step_c" not in state.step_checkpoints
+    assert state.status == WorkflowStatus.SUSPENDED

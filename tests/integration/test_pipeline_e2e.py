@@ -68,4 +68,5 @@ def test_e2e_resumable_pipeline(tmp_path: Path) -> None:
     assert resumed_res.step_checkpoints["write_summary"].output_payload == {"sum": 120}
 
     # CRITICAL INVARIANT: Step 1 was durable in SQLite and never re-executed!
-    assert step_1_runs == 1
+    final_step_1_runs = step_1_runs
+    assert final_step_1_runs == 1

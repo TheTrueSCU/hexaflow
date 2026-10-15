@@ -5,6 +5,8 @@ Notes/Architectural Intent:
     validated WorkflowDefinitions and delegate execution to the engine seamlessly.
 """
 
+from pathlib import Path
+
 from hexaflow.adapters.engines.local_async import AsyncioWorkflowEngine
 from hexaflow.adapters.storage.in_memory import InMemoryStateStore
 from hexaflow.domain.models import ExecutionPool, StageExecutionMode, TriggerRule
@@ -229,3 +231,181 @@ async def test_dsl_context_managers() -> None:
     async with Workflow("ctx_async", max_thread_workers=2) as wf_async:
         name = wf_async.name
         assert name == "ctx_async"
+
+
+def test_dsl_bind_store(tmp_path: Path) -> None:
+    """Validate bind_store reconfigures state store on workflow and engine."""
+    from hexaflow.adapters.storage.sqlite import SqliteStateStore
+
+    wf = Workflow("bind_store_wf")
+    new_store = SqliteStateStore(db_path=tmp_path / "bind.db")
+    wf.bind_store(new_store)
+
+    assert wf._store is new_store
+    engine = wf._engine
+    assert isinstance(engine, AsyncioWorkflowEngine)
+    assert engine._store is new_store
+
+
+def test_dsl_bind_store_invalid_engine() -> None:
+    """Validate bind_store raises TypeError when engine does not support store binding."""
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    from hexaflow.adapters.storage.in_memory import InMemoryStateStore
+    from hexaflow.ports.engine import WorkflowEnginePort
+
+    engine = MagicMock(spec=WorkflowEnginePort)
+    wf = Workflow("dummy_wf", engine=engine)
+    with pytest.raises(TypeError, match="does not support binding a state store"):
+        wf.bind_store(InMemoryStateStore())
+
+
+def test_workflow_dsl_graph_and_renderers() -> None:
+    """Validate to_graph, to_dot, render, and render_image via Workflow builder."""
+    wf = Workflow("graph_dsl_wf")
+
+    @wf.step("extract", estimated_duration_seconds=2.5)
+    def extract(ctx):
+        return [1, 2, 3]
+
+    @wf.step("transform", depends_on=["extract"], side_effects=True, estimated_duration_seconds=5.0)
+    def transform(ctx):
+        return [x * 2 for x in ctx.get("extract")]
+
+    graph = wf.to_graph()
+    assert graph.workflow_name == "graph_dsl_wf"
+    assert len(graph.nodes) == 2
+
+    # Test DOT rendering
+    dot_out = wf.to_dot()
+    assert 'digraph "graph_dsl_wf"' in dot_out
+
+    # Test generic render
+    mermaid_out = wf.render("mermaid")
+    assert "flowchart TD" in mermaid_out
+
+    json_out = wf.render("json")
+    assert '"workflow_id": "graph_dsl_wf"' in json_out
+
+    # Test image rendering (ascii fallback provides svg)
+    svg_bytes = wf.render_image("ascii", "svg")
+    assert svg_bytes.startswith(b"<svg")
+
+
+def test_workflow_dsl_simulate_and_fault_injection() -> None:
+    """Validate wf.simulate() and async simulate with mock and fault injection."""
+    wf = Workflow("sim_wf")
+
+    executed_side_effect = False
+
+    @wf.step("query_records")
+    def query_records(ctx):
+        return {"users": ["alice", "bob"]}
+
+    @wf.step(
+        "notify_users", depends_on=["query_records"], side_effects=True, dry_run={"delivered": 2}
+    )
+    def notify_users(ctx):
+        nonlocal executed_side_effect
+        executed_side_effect = True
+        return {"delivered": 100}
+
+    # Run simulation
+    sim_state = wf.simulate()
+    assert sim_state.status == WorkflowStatus.COMPLETED
+    assert executed_side_effect is False
+    assert sim_state.step_checkpoints["notify_users"].output_payload == {"delivered": 2}
+
+    # Test simulate with fault injection
+    fault_state = wf.simulate(fault_injection={"query_records": TimeoutError("Simulated timeout")})
+    assert fault_state.status == WorkflowStatus.SUSPENDED
+    assert fault_state.step_checkpoints["query_records"].status == StepStatus.FAILED
+
+
+def test_workflow_dsl_rewind() -> None:
+    """Validate wf.rewind() from the fluent Workflow builder."""
+    store = InMemoryStateStore()
+    wf = Workflow("rewind_dsl_wf", state_store=store)
+
+    counts = {"a": 0, "b": 0}
+
+    @wf.step("step_a")
+    def step_a(ctx):
+        counts["a"] += 1
+        return 10
+
+    @wf.step("step_b", depends_on=["step_a"])
+    def step_b(ctx):
+        counts["b"] += 1
+        return ctx.inputs["step_a"] + 20
+
+    res1 = wf.run()
+    assert res1.status == WorkflowStatus.COMPLETED
+    assert counts == {"a": 1, "b": 1}
+
+    # Rewind step_b
+    res2 = wf.rewind(res1.run_id, to_step="step_b")
+    assert res2.status == WorkflowStatus.COMPLETED
+    assert counts == {"a": 1, "b": 2}
+
+
+def test_workflow_dsl_middleware_registration_and_execution() -> None:
+    """Validate wf.use(middleware) and constructor middleware support in Workflow DSL."""
+    from hexaflow.adapters.middleware.timing import TimingStepMiddleware
+    from hexaflow.domain.state import StepContext
+
+    class CustomMarkerMiddleware:
+        def __call__(self, ctx: StepContext, next_call):
+            ctx.metadata["custom_marker"] = True
+            return next_call(ctx)
+
+    marker_mw = CustomMarkerMiddleware()
+    timing_mw = TimingStepMiddleware()
+    store = InMemoryStateStore()
+
+    wf = Workflow("middleware_dsl_wf", state_store=store, middleware=[marker_mw])
+    wf.use(timing_mw)
+
+    assert len(wf.middleware) == 2
+
+    @wf.step("compute")
+    def compute(ctx: StepContext) -> int:
+        assert ctx.metadata.get("custom_marker") is True
+        return 777
+
+    res = wf.run()
+    assert res.status == WorkflowStatus.COMPLETED
+    assert res.step_checkpoints["compute"].output_payload == 777
+
+
+def test_workflow_dsl_middleware_unsupported_engine() -> None:
+    """Validate that Workflow.use raises TypeError when engine does not support middleware."""
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    from hexaflow.adapters.middleware.timing import TimingStepMiddleware
+
+    mock_engine = MagicMock(spec=[])  # Empty spec, no use method
+    wf = Workflow("no_mw_engine", engine=mock_engine)
+
+    mw = TimingStepMiddleware()
+    with pytest.raises(TypeError, match="does not support step middleware"):
+        wf.use(mw)
+
+    assert wf.middleware == []
+
+
+def test_workflow_dsl_custom_engine_constructor_middleware() -> None:
+    """Validate that passing engine and middleware in Workflow constructor forwards to engine.use()."""
+    from unittest.mock import MagicMock
+
+    from hexaflow.adapters.middleware.timing import TimingStepMiddleware
+
+    mock_engine = MagicMock()
+    mw = TimingStepMiddleware()
+    wf = Workflow("custom_engine_wf", engine=mock_engine, middleware=[mw])
+    assert wf.name == "custom_engine_wf"
+    mock_engine.use.assert_called_once_with(mw)

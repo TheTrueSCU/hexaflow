@@ -10,7 +10,7 @@ permissions:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]'
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     permissions:
       pull-requests: write
       contents: write
@@ -21,7 +21,16 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Patch and minor updates: enable auto-merge and let CI gate the merge.
+      # Patch and minor updates: approve and enable auto-merge
+      - name: Approve patch and minor updates
+        if: >-
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          steps.meta.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr review --approve "$PR_URL" || true
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Auto-merge patch and minor updates
         if: >-
           steps.meta.outputs.update-type == 'version-update:semver-patch' ||
@@ -31,10 +40,19 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Major updates: label for visibility and leave for human review.
-      - name: Label major updates for human review
-        if: steps.meta.outputs.update-type == 'version-update:semver-major'
-        run: gh pr edit "$PR_URL" --add-label "major-update"
+      # Categorize updates with labels
+      - name: Label pull request
+        run: |
+          UPDATE_TYPE="${{ steps.meta.outputs.update-type }}"
+          if [ "$UPDATE_TYPE" = "version-update:semver-major" ]; then
+            gh pr edit "$PR_URL" --add-label "dependencies,major-update"
+          elif [ "$UPDATE_TYPE" = "version-update:semver-minor" ]; then
+            gh pr edit "$PR_URL" --add-label "dependencies,minor-update,automerge"
+          elif [ "$UPDATE_TYPE" = "version-update:semver-patch" ]; then
+            gh pr edit "$PR_URL" --add-label "dependencies,patch-update,automerge"
+          else
+            gh pr edit "$PR_URL" --add-label "dependencies"
+          fi
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

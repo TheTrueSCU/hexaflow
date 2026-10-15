@@ -263,6 +263,51 @@ def test_trigger_rules_evaluation() -> None:
         is False
     )
 
+    # Unknown trigger rule returns False
+    from typing import cast
+
+    unknown_rule_res = evaluate_trigger_rule(
+        cast(TriggerRule, "UNKNOWN_RULE"), [StepStatus.COMPLETED]
+    )
+    assert unknown_rule_res is False
+
+
+def test_validate_dependency_schedule_rejects_out_of_order_dependencies() -> None:
+    """Validate that forward dependencies or concurrent dependencies are rejected."""
+    step_1 = StepDefinition(name="step_1", action=lambda ctx: 1, depends_on=("step_2",))
+    step_2 = StepDefinition(name="step_2", action=lambda ctx: 2)
+
+    # 1. Backward dependency within same sequential stage (step_1 declared before step_2)
+    stage_seq = StageDefinition(
+        name="seq_stage",
+        steps=(step_1, step_2),
+        execution_mode=StageExecutionMode.SEQUENTIAL,
+    )
+    with pytest.raises(InvalidWorkflowDAGError, match="not scheduled before it"):
+        WorkflowDefinition(name="bad_seq_wf", stages=(stage_seq,))
+
+    # 2. Dependency within concurrent stage
+    stage_conc = StageDefinition(
+        name="conc_stage",
+        steps=(step_2, step_1),
+        execution_mode=StageExecutionMode.CONCURRENT_ALL,
+    )
+    with pytest.raises(InvalidWorkflowDAGError, match="not scheduled before it"):
+        WorkflowDefinition(name="bad_conc_wf", stages=(stage_conc,))
+
+    # 3. Dependency on a step in a future stage
+    stage_a = StageDefinition(name="stage_a", steps=(step_1,))
+    stage_b = StageDefinition(name="stage_b", steps=(step_2,))
+    with pytest.raises(InvalidWorkflowDAGError, match="not scheduled before it"):
+        WorkflowDefinition(name="bad_future_wf", stages=(stage_a, stage_b))
+
+    # 4. External/undeclared dependency skips schedule check
+    from hexaflow.domain.models import _validate_dependency_schedule
+
+    step_ext = StepDefinition(name="step_ext", action=lambda ctx: 1, depends_on=("ext_dep",))
+    stage_ext = StageDefinition(name="stage_ext", steps=(step_ext,))
+    _validate_dependency_schedule((stage_ext,))
+
 
 def test_step_definition_mapping_attributes() -> None:
     """Validate StepDefinition mapped step attributes."""
@@ -298,12 +343,13 @@ def test_workflow_to_mermaid_and_ascii() -> None:
 
     stage_1 = StageDefinition(name="source", steps=(step_a,))
     stage_2 = StageDefinition(
-        name="compute", steps=(step_b, step_c), execution_mode=StageExecutionMode.CONCURRENT_ALL
+        name="compute", steps=(step_b,), execution_mode=StageExecutionMode.CONCURRENT_ALL
     )
+    stage_3 = StageDefinition(name="sink", steps=(step_c,))
 
     workflow = WorkflowDefinition(
         name="etl_pipeline",
-        stages=(stage_1, stage_2),
+        stages=(stage_1, stage_2, stage_3),
         version="2.0.0",
     )
 

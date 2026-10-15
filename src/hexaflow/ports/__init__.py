@@ -6,9 +6,17 @@ Notes/Architectural Intent:
 """
 
 from hexaflow.ports.engine import WorkflowEnginePort
+from hexaflow.ports.middleware import StepMiddlewarePort
+from hexaflow.ports.renderer import (
+    GraphRendererPort,
+    RenderOptions,
+)
 from hexaflow.ports.storage import WorkflowStateStorePort
 
 __all__ = [
+    "GraphRendererPort",
+    "RenderOptions",
+    "StepMiddlewarePort",
     "WorkflowEnginePort",
     "WorkflowStateStorePort",
 ]

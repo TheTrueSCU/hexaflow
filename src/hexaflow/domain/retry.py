@@ -70,6 +70,7 @@ class RetryPolicy(NamedTuple):
             Implements constant, linear, or exponential backoff with full jitter to avoid
             thundering herd problem against downstream dependencies.
         """
+        delay: float = self.initial_delay_seconds
         match self.backoff_type:
             case BackoffType.CONSTANT:
                 delay = self.initial_delay_seconds
@@ -77,6 +78,8 @@ class RetryPolicy(NamedTuple):
                 delay = self.initial_delay_seconds * attempt
             case BackoffType.EXPONENTIAL:
                 delay = self.initial_delay_seconds * (self.backoff_factor ** (attempt - 1))
+            case _:
+                delay = self.initial_delay_seconds
 
         delay = min(delay, self.max_delay_seconds)
         if self.jitter:
