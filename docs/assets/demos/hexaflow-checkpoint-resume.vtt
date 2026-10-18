@@ -1,0 +1,21 @@
+WEBVTT
+
+1
+00:00:00.500 --> 00:00:02.135
+1. Starting Multi-Stage ML Pipeline: Worker disk crash suspends workflow
+
+2
+00:00:02.135 --> 00:00:03.770
+2. Inspecting Checkpointed Memento State: Verifying completed upstream stages
+
+3
+00:00:03.770 --> 00:00:05.405
+3. Inspecting Failure Diagnostics and Worker Exception Traceback
+
+4
+00:00:05.405 --> 00:00:07.040
+4. Healing Environment and Resuming Workflow from Checkpoint (Skipping Stage 1)
+
+5
+00:00:07.040 --> 00:00:10.175
+5. Validating Final Terminal Completion State Across All Stages

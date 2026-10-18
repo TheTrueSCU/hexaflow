@@ -3,7 +3,7 @@ repos:
     rev: v4.6.0
     hooks:
       - id: check-added-large-files
-        args: [--maxkb=1024]
+        args: [--maxkb=5120]
         exclude: uv\.lock$
       - id: check-ast
       - id: check-case-conflict

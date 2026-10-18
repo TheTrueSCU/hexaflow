@@ -1,0 +1,21 @@
+WEBVTT
+
+1
+00:00:00.500 --> 00:00:02.135
+1. Inspecting Distributed Saga DAG with Forward Actions and Backward Compensations
+
+2
+00:00:02.135 --> 00:00:03.770
+2. Dispatching Saga Execution: Payment failure triggers safe suspension
+
+3
+00:00:03.770 --> 00:00:05.405
+3. Inspecting Suspended Workflow and Completed Step Checkpoints
+
+4
+00:00:05.405 --> 00:00:07.040
+4. Aborting Saga: Automatically unwinding compensations in reverse LIFO order
+
+5
+00:00:07.040 --> 00:00:10.175
+5. Validating Zero State Leaks across Distributed System Resources

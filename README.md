@@ -99,6 +99,18 @@ if __name__ == "__main__":
 
 ---
 
+## 🎬 Interactive Demos & User Journeys
+
+Explore verified terminal user journeys rendered headlessly via Playwright:
+
+| User Journey | Recording | Captions | Description |
+|---|---|---|---|
+| **HF-02: Saga Compensation** | [`hexaflow-saga-compensation.webm`](docs/assets/demos/hexaflow-saga-compensation.webm) | [WebVTT Track](docs/assets/demos/hexaflow-saga-compensation.vtt) | Multi-step distributed saga with reverse (LIFO) compensation unwinding on abort. |
+| **HF-03: Step Middleware Pipeline** | [`hexaflow-step-middleware.webm`](docs/assets/demos/hexaflow-step-middleware.webm) | [WebVTT Track](docs/assets/demos/hexaflow-step-middleware.vtt) | Onion-layered step interceptors capturing spans, correlation IDs, and timing metrics. |
+| **HF-04: Memento Crash Recovery** | [`hexaflow-checkpoint-resume.webm`](docs/assets/demos/hexaflow-checkpoint-resume.webm) | [WebVTT Track](docs/assets/demos/hexaflow-checkpoint-resume.vtt) | Long-running workflow suspension on worker failure and zero-waste checkpoint resumption. |
+
+---
+
 ## 🖥️ Command Line Interface (CLI)
 
 `hexaflow` includes a fast, zero-daemon CLI (`hexaflow` or `hf`):
