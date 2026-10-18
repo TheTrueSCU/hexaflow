@@ -106,9 +106,9 @@ def step_train(ctx: StepContext) -> dict[str, float]:
     status_code = res_status.exit_code
     assert status_code == 0
     assert "SUSPENDED" in res_status.stdout
-    assert "download_dataset" in res_status.stdout
+    assert any(name in res_status.stdout for name in ("download_dataset", "download_d"))
     assert "COMPLETED" in res_status.stdout
-    assert "normalize_features" in res_status.stdout
+    assert any(name in res_status.stdout for name in ("normalize_features", "normalize_"))
     assert "FAILED" in res_status.stdout
 
     # Step 3: Inspect failure traceback

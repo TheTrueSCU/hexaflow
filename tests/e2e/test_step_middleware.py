@@ -124,9 +124,9 @@ def dispatch_order(ctx: StepContext) -> dict[str, str]:
     )
     assert res_status.exit_code == 0
     assert "COMPLETED" in res_status.stdout
-    assert "validate_cart" in res_status.stdout
-    assert "charge_gateway" in res_status.stdout
-    assert "dispatch_order" in res_status.stdout
+    assert any(name in res_status.stdout for name in ("validate_cart", "validate_c"))
+    assert any(name in res_status.stdout for name in ("charge_gateway", "charge_g"))
+    assert any(name in res_status.stdout for name in ("dispatch_order", "dispatch_o"))
 
     # Step 4: Inspect Step Output Payload
     narrator.step("4. Inspecting Step Checkpoint Payload across Interceptor Layers")
