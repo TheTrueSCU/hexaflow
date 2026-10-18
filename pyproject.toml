@@ -44,11 +44,14 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "hexaqual[all]>=0.8.0",
+    "hexastack-cli>=0.9.0",
     "hypothesis>=6.168.0",
+    "playwright>=1.50.0",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
+    "pytest-playwright>=0.7.0",
     "ruff>=0.16.7",
     "ty>=0.0.75",
     "zensical>=0.0.59",
@@ -62,6 +65,9 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 addopts = "-ra -q --strict-markers"
+markers = [
+    "demo: marks demo journey tests",
+]
 
 [tool.ruff]
 line-length = 100

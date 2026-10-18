@@ -1,0 +1,21 @@
+WEBVTT
+
+1
+00:00:00.500 --> 00:00:02.135
+1. Inspecting Workflow Pipeline with Chained Interceptors (Correlation, Span, Timing)
+
+2
+00:00:02.135 --> 00:00:03.770
+2. Dispatching Workflow: Interceptor stack captures spans and timing metrics
+
+3
+00:00:03.770 --> 00:00:05.405
+3. Inspecting Completed Stage Checkpoints and Latency Metrics
+
+4
+00:00:05.405 --> 00:00:07.040
+4. Inspecting Step Checkpoint Payload across Interceptor Layers
+
+5
+00:00:07.040 --> 00:00:09.140
+5. Validating Span Cascades, Correlation IDs, and High-Precision Latencies
