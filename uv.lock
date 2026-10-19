@@ -459,7 +459,7 @@ provides-extras = ["sentry"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "hexaqual", extras = ["all"], specifier = ">=0.8.0" },
+    { name = "hexaqual", extras = ["all"], specifier = ">=0.9.3" },
     { name = "hexastack-cli", specifier = ">=0.9.0" },
     { name = "hypothesis", specifier = ">=6.168.0" },
     { name = "playwright", specifier = ">=1.50.0" },
@@ -475,7 +475,7 @@ dev = [
 
 [[package]]
 name = "hexaqual"
-version = "0.8.0"
+version = "0.9.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "complexipy" },
@@ -492,9 +492,9 @@ dependencies = [
     { name = "rich" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/09/68/e5d814edccb3e871a0f12d400ee42a132b2344acfa70ffa0447878c6d903/hexaqual-0.8.0.tar.gz", hash = "sha256:136ed8cb78ba2e00285abb68c3f17e4606a2016f9e239f107d5b1756d831db65", size = 370540, upload-time = "2026-09-27T04:46:53.778Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/ee/09f012a0593e7567114e808eba667762a25d8469b1987255c966c0fb9af5/hexaqual-0.9.3.tar.gz", hash = "sha256:f7cd7dc9ff9d747798a87f7d78d3b9d35e3afd10ebed50998f82a3d36e008185", size = 6524256, upload-time = "2026-10-19T19:26:23.341Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/36/15/14d54870ab1d9758ed98aae0d5696288dc0066cce1c6163ec0b9ebcf8a5e/hexaqual-0.8.0-py3-none-any.whl", hash = "sha256:c53c47b0a73b231f38c7f038310bb217d7934328727ff1165c86d8fba3a43224", size = 245877, upload-time = "2026-09-27T04:46:52.542Z" },
+    { url = "https://files.pythonhosted.org/packages/21/12/209a23f442a58446f5a7a172a7036daf11453a22b80936dbcaa56620b35a/hexaqual-0.9.3-py3-none-any.whl", hash = "sha256:85c5b16e28f6129da992e22fad8f26138a4cf4ccba436eeddfad8c08d438ea54", size = 289845, upload-time = "2026-10-19T19:26:21.347Z" },
 ]
 
 [package.optional-dependencies]
