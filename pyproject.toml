@@ -43,7 +43,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "hexaqual[all]>=0.8.0",
+    "hexaqual[all]>=0.9.3",
     "hexastack-cli>=0.9.0",
     "hypothesis>=6.168.0",
     "playwright>=1.50.0",
@@ -56,6 +56,9 @@ dev = [
     "ty>=0.0.75",
     "zensical>=0.0.59",
 ]
+
+[tool.ty.environment]
+extra-paths = ["src"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
@@ -89,3 +92,35 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 [project.scripts]
 hexaflow = "hexaflow.cli.main:app"
 hf = "hexaflow.cli.main:app"
+
+[tool.importlinter]
+root_packages = ["hexaflow"]
+
+[[tool.importlinter.contracts]]
+name = "Hexagonal architecture layer hierarchy"
+type = "layers"
+containers = ["hexaflow"]
+layers = [
+    "adapters",
+    "ports",
+    "domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Forbidden imports for domain"
+type = "forbidden"
+source_modules = ["hexaflow.domain"]
+forbidden_modules = [
+    "hexaflow.ports",
+    "hexaflow.adapters",
+    "hexaflow.cli",
+]
+
+[[tool.importlinter.contracts]]
+name = "Forbidden imports for ports"
+type = "forbidden"
+source_modules = ["hexaflow.ports"]
+forbidden_modules = [
+    "hexaflow.adapters",
+    "hexaflow.cli",
+]

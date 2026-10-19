@@ -29,9 +29,15 @@ jobs:
           uvx --python 3.13 --from "hexaflow>=0.5.0" hexaflow graph render .github/workflows/ci.yml --summary --critical-path
 
       - name: Run Quality Gate via Hexaqual
-        uses: TheTrueSCU/hexaqual@1a37ad125f86dacd57616e1c1b3fab56185e50c3 # v0.9.1
+        uses: TheTrueSCU/hexaqual@7de5ade62e96ac7623b5ec649997e562eea2822d # v0.9.3
         with:
           sync-args: "--all-extras --dev"
+
+      - name: Audit Repository Quality Gates
+        run: uv run hexaqual sanity --audit-gates
+
+      - name: Verify Documentation Consistency (Anti-Drift Linter)
+        run: uv run hexaqual docs drift
 
   # =========================================================================
   # Stage 2: Unit / Integration Tests & Code Coverage
