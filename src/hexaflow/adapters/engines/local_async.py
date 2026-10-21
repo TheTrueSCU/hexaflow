@@ -10,6 +10,7 @@ Notes/Architectural Intent:
 import asyncio
 import concurrent.futures
 import copy
+import importlib
 import inspect
 import logging
 import multiprocessing
@@ -67,8 +68,6 @@ def _capture_sentry_step_exception(
 ) -> None:
     """Push workflow step failure context to Sentry scope if sentry_sdk is active."""
     try:
-        import importlib
-
         sentry_sdk = importlib.import_module("sentry_sdk")
         with sentry_sdk.push_scope() as scope:
             scope.set_tag("workflow_name", workflow_name)
