@@ -53,7 +53,7 @@ from hexaflow.ports.engine import WorkflowEnginePort
 from hexaflow.ports.middleware import StepMiddlewarePort
 from hexaflow.ports.storage import WorkflowStateStorePort
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 
 __all__ = [

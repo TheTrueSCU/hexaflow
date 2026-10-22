@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-10-22
+
+### Security & Dependencies
+- Upgraded `certifi` to `>=2026.10.19` addressing the eMudhra CA advisory.
+- Upgraded `virtualenv` to `>=21.14.12` resolving `CVE-2026-113725` and `CVE-2026-113722`.
+- Upgraded dev tooling to `hexaqual[all]>=0.9.6`.
+
+### Refactored & Governance
+- Moved `importlib` import to module top-level in `src/hexaflow/adapters/engines/local_async.py` enforcing strict domain purity and lazy-import compliance.
+- Codified monorepo Architectural Decision Records (`docs/decisions.md`).
+
+### Verification & Testing
+- Implemented comprehensive self-verifying end-to-end user journeys:
+  - `HF-02`: Resilient Saga Compensation and Rollback (`tests/e2e/test_saga_compensation.py`).
+  - `HF-03`: Onion-layered Step Middleware Pipeline & Telemetry (`tests/e2e/test_step_middleware.py`).
+  - `HF-04`: Memento Checkpoint Resumption & Crash Recovery (`tests/e2e/test_cli_resumption.py`).
+- Integrated dynamic `hexaflow graph render` diagram visualization into CI, documentation, and release workflows.
+
 ## [0.5.0] - 2026-10-11
 
 ### Added
