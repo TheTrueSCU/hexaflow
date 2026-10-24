@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 
 import pytest
-from hexastack_cli.testing.narrator import CliNarrator
+from hexaqual.adapters.testing.narrator import CliNarrator
 
 from hexaflow.cli.main import app
 
