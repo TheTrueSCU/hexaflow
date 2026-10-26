@@ -28,6 +28,8 @@ ENV/
 # Testing & Quality
 .coverage
 .coverage.*
+.benchmarks/
+benchmark_results*.json
 htmlcov/
 .pytest_cache/
 .hypothesis/
