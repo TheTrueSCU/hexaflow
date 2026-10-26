@@ -39,6 +39,11 @@ jobs:
       - name: Execute Mutation Sweep
         run: uv run hexaqual mutate run -e gremlins -w auto --batch-size 10 -n auto
 
+      - name: Generate Mutation Triage Summary
+        if: always()
+        run: |
+          uv run hexaqual mutate inspect -s -f markdown >> "$GITHUB_STEP_SUMMARY" || true
+
       - name: Upload Mutation Audit Artifacts
         if: always()
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4

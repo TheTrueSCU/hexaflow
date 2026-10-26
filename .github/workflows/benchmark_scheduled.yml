@@ -34,9 +34,29 @@ jobs:
       - name: Install Dependencies
         run: uv sync --all-extras --all-groups
 
+      - name: Restore Benchmark History
+        uses: actions/cache/restore@v4
+        with:
+          path: .benchmarks_history/
+          key: benchmark-history-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            benchmark-history-${{ runner.os }}-
+
       - name: Run Microbenchmarks
         run: |
           uv run pytest tests/benchmarks -n 0 --benchmark-enable --benchmark-only --no-cov --benchmark-autosave --benchmark-json=benchmark_results.json
+
+      - name: Generate Benchmark Summary & Latency Trend Charts
+        if: always()
+        run: |
+          uv run hexaqual test benchmark-report --results benchmark_results.json --history .benchmarks_history/history.json --summary || true
+
+      - name: Save Benchmark History
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .benchmarks_history/
+          key: benchmark-history-${{ runner.os }}-${{ github.run_id }}
 
       - name: Upload Benchmark Results
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4

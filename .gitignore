@@ -29,6 +29,7 @@ ENV/
 .coverage
 .coverage.*
 .benchmarks/
+.benchmarks_history/
 benchmark_results*.json
 htmlcov/
 .pytest_cache/
