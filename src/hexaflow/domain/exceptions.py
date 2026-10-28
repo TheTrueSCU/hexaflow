@@ -33,6 +33,16 @@ class DuplicateStepError(InvalidWorkflowDAGError):
     """
 
 
+class MissingDependencyError(WorkflowError, ImportError):
+    """Raised when an optional third-party dependency is missing.
+
+    Notes/Architectural Intent:
+        Inherits from both WorkflowError and ImportError so callers can trap either
+        generic hexaflow failures or standard Python import errors while receiving
+        actionable remediation commands.
+    """
+
+
 class StepNotFoundError(WorkflowError):
     """Raised when an operation references a step identifier that does not exist in the workflow.
 
@@ -138,6 +148,7 @@ __all__ = [
     "DryRunUnsafeStepError",
     "DuplicateStepError",
     "InvalidWorkflowDAGError",
+    "MissingDependencyError",
     "RendererToolNotFoundError",
     "StepFailedError",
     "StepNotFoundError",

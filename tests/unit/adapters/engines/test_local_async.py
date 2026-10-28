@@ -790,6 +790,28 @@ def test_engine_sentry_step_failure_hook(monkeypatch) -> None:
     assert mock_sentry.capture_exception.called
 
 
+def test_engine_sentry_inactive_fallback(monkeypatch) -> None:
+    """Verify engine handles step failure gracefully when sentry_sdk is not installed."""
+    import sys
+    from unittest.mock import patch
+
+    monkeypatch.delitem(sys.modules, "sentry_sdk", raising=False)
+    store = InMemoryStateStore()
+    engine = AsyncioWorkflowEngine(state_store=store)
+
+    def failing_action(ctx):
+        raise RuntimeError("simulated pipeline error")
+
+    step_fail = StepDefinition(name="failing_step", action=failing_action)
+    stage = StageDefinition(name="fail_stage", steps=(step_fail,))
+    wf = WorkflowDefinition(name="sentry_inactive_wf", stages=(stage,))
+
+    with patch("hexaflow.adapters.engines.local_async.optional_dependency", return_value=None):
+        res = engine.run(wf)
+    status = res.status
+    assert status == WorkflowStatus.SUSPENDED
+
+
 def test_engine_resume_and_abort_missing_run_and_input_merging() -> None:
     """Validate exceptions when resuming or aborting non-existent runs, and input merging."""
     from hexaflow.domain.exceptions import WorkflowAborted, WorkflowSuspended

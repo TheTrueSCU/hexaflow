@@ -10,7 +10,6 @@ Notes/Architectural Intent:
 import asyncio
 import concurrent.futures
 import copy
-import importlib
 import inspect
 import logging
 import multiprocessing
@@ -53,6 +52,7 @@ from hexaflow.domain.state import (
 from hexaflow.ports.engine import WorkflowEnginePort
 from hexaflow.ports.middleware import StepMiddlewarePort
 from hexaflow.ports.storage import WorkflowStateStorePort
+from hexaflow.utils.imports import optional_dependency
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +67,11 @@ def _capture_sentry_step_exception(
     pool: str | None = None,
 ) -> None:
     """Push workflow step failure context to Sentry scope if sentry_sdk is active."""
+    sentry_sdk = optional_dependency("sentry_sdk")
+    if sentry_sdk is None:
+        return
+
     try:
-        sentry_sdk = importlib.import_module("sentry_sdk")
         with sentry_sdk.push_scope() as scope:
             scope.set_tag("workflow_name", workflow_name)
             scope.set_tag("stage_name", stage_name)
