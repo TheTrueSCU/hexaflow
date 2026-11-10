@@ -35,7 +35,7 @@ jobs:
         run: uv sync --all-extras --all-groups
 
       - name: Restore Benchmark History
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .benchmarks_history/
           key: benchmark-history-${{ runner.os }}-${{ github.run_id }}
@@ -52,7 +52,7 @@ jobs:
           uv run hexaqual test benchmark-report --results benchmark_results.json --history .benchmarks_history/history.json --summary || true
 
       - name: Save Benchmark History
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always()
         with:
           path: .benchmarks_history/
