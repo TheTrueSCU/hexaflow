@@ -36,8 +36,41 @@ jobs:
       - name: Install Dependencies
         run: uv sync --all-extras --all-groups
 
+      - name: Cluster Reachability & Health Probe
+        id: cluster-probe
+        continue-on-error: true
+        env:
+          HEXAQUEUE_ENV: ${{ secrets.HEXAQUEUE_ENV }}
+        run: |
+          if [ -z "$HEXAQUEUE_ENV" ]; then
+            echo "status=unreachable" >> "$GITHUB_OUTPUT"
+            echo "Hexaqueue cluster secrets not configured - running locally"
+            exit 0
+          fi
+          echo "status=healthy" >> "$GITHUB_OUTPUT"
+          echo "Hexaqueue cluster credentials detected"
+
+      - name: Connect to Hexaqueue Cluster (Cloud Execution)
+        if: steps.cluster-probe.outputs.status == 'healthy'
+        uses: TheTrueSCU/hexaqueue@abe72e4be5cd26852a03a7da8a720e7b7e959a1a # v0.10.0
+        with:
+          cluster-env: ${{ secrets.HEXAQUEUE_ENV }}
+          auto-tunnel: "true"
+          step-summary: "false"
+
       - name: Execute Mutation Sweep
-        run: uv run hexaqual mutate run -e gremlins -w auto --batch-size 10 -n auto
+        env:
+          HEXAQUEUE_TIMEOUT: "7200"
+        run: |
+          CLUSTER_FLAGS=""
+          if [ "${{ steps.cluster-probe.outputs.status }}" = "healthy" ]; then
+            CLUSTER_FLAGS="--cluster hexaqueue"
+          fi
+          uv run hexaqual mutate run -e gremlins -w auto --batch-size 10 -n auto $CLUSTER_FLAGS
+
+      - name: Disconnect Hexaqueue Cluster Tunnel
+        if: always() && steps.cluster-probe.outputs.status == 'healthy'
+        run: uv run hq cluster tunnel --stop || true
 
       - name: Generate Mutation Triage Summary
         if: always()

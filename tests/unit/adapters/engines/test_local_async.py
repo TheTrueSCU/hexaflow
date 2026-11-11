@@ -767,6 +767,7 @@ def test_engine_sentry_step_failure_hook(monkeypatch) -> None:
 
     mock_sentry = MagicMock()
     mock_scope = MagicMock()
+    mock_sentry.new_scope.return_value.__enter__.return_value = mock_scope
     mock_sentry.push_scope.return_value.__enter__.return_value = mock_scope
     monkeypatch.setitem(sys.modules, "sentry_sdk", mock_sentry)
 
