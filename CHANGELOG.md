@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-11-10
+
+### Refactored & Governance
+- Adopted `require_dependency` and `optional_dependency` utilities for uniform lazy/optional import handling.
+- Replaced deprecated Sentry SDK `push_scope()` with `new_scope()`.
+- Upgraded governance and quality toolchain to `hexaqual[all]>=0.10.5`.
+
+### CI & Verification
+- Offloaded mutation verification to Hexaqueue cloud worker cluster (`mutation_scheduled.yml`, `ci.yml`).
+- Pinned all GitHub Actions to immutable full commit SHAs.
+- Updated workspace dependencies.
+
 ## [0.5.2] - 2026-10-23
 
 ### Added

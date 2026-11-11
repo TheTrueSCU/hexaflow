@@ -1,6 +1,6 @@
 [project]
 name = "hexaflow"
-version = "0.5.2"
+version = "0.5.3"
 description = "Lightweight, embeddable Python workflow engine with stages, steps, splits, joins, and checkpointed resumption."
 
 readme = "README.md"
@@ -69,7 +69,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = "-ra -q --strict-markers"
+addopts = "-ra -q --strict-markers --ignore=tests/benchmarks"
 markers = [
     "demo: marks demo journey tests",
 ]
