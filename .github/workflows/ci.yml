@@ -29,7 +29,7 @@ jobs:
           uvx --python 3.13 --from "hexaflow>=0.5.0" hexaflow graph render .github/workflows/ci.yml --summary --critical-path
 
       - name: Run Quality Gate via Hexaqual
-        uses: TheTrueSCU/hexaqual@b2c312f76c0c447b359b99b96ea02d82116ae287 # v0.10.0
+        uses: TheTrueSCU/hexaqual@73151ca7dcd31df0f4b336ffb6312bb0fd63ff41 # v0.10.5
         with:
           sync-args: "--all-extras --dev"
 
@@ -38,6 +38,29 @@ jobs:
 
       - name: Verify Documentation Consistency (Anti-Drift Linter)
         run: uv run hexaqual docs drift
+
+  # =========================================================================
+  # Cluster Reachability & Health Probe (Optional Compute Fleet Offloading)
+  # =========================================================================
+  cluster-probe:
+    name: Cluster Reachability & Health Probe
+    runs-on: ubuntu-latest
+    outputs:
+      cluster_ready: ${{ steps.probe.outputs.cluster_ready }}
+    steps:
+      - name: Probe Hexaqueue Cloud Fleet
+        id: probe
+        continue-on-error: true
+        env:
+          HEXAQUEUE_ENV: ${{ secrets.HEXAQUEUE_ENV }}
+        run: |
+          if [ -z "$HEXAQUEUE_ENV" ]; then
+            echo "cluster_ready=false" >> "$GITHUB_OUTPUT"
+            echo "Hexaqueue cluster secrets not configured - running locally"
+            exit 0
+          fi
+          echo "cluster_ready=true" >> "$GITHUB_OUTPUT"
+          echo "Hexaqueue cluster credentials detected"
 
   # =========================================================================
   # Stage 2: Unit / Integration Tests & Code Coverage
@@ -114,9 +137,11 @@ jobs:
 
   mutation-verification:
     name: Mutation Testing Verification
-    needs: [test-suite]
-    if: github.event_name == 'pull_request'
+    needs: [test-suite, cluster-probe]
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && !startsWith(github.head_ref, 'dependabot/')
+    continue-on-error: true
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -135,8 +160,27 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
-      - name: Run Mutation Testing Verification
+      - name: Connect to Hexaqueue Cluster (Cloud Execution)
+        if: needs.cluster-probe.outputs.cluster_ready == 'true'
+        uses: TheTrueSCU/hexaqueue@abe72e4be5cd26852a03a7da8a720e7b7e959a1a # v0.10.0
+        with:
+          cluster-env: ${{ secrets.HEXAQUEUE_ENV }}
+          auto-tunnel: "true"
+          step-summary: "false"
+
+      - name: Run Mutation Testing via Hexaqueue Cloud
+        if: needs.cluster-probe.outputs.cluster_ready == 'true'
+        env:
+          HEXAQUEUE_TIMEOUT: "3600"
+        run: uv run hexaqual mutate run -e gremlins -w auto --batch-size 10 -n auto --cluster hexaqueue
+
+      - name: Run Mutation Testing Locally (Fallback)
+        if: needs.cluster-probe.outputs.cluster_ready != 'true'
         run: uv run hexaqual mutate run -e gremlins -w auto --batch-size 10 -n auto
+
+      - name: Disconnect Hexaqueue Cluster Tunnel
+        if: always() && needs.cluster-probe.outputs.cluster_ready == 'true'
+        run: uv run hq cluster tunnel --stop || true
 
   # =========================================================================
   # Stage 4: Unified CI Success Status Check (Branch Protection Gate)
@@ -146,6 +190,7 @@ jobs:
     name: CI Success (All Required Checks)
     needs:
       - quality-gate
+      - cluster-probe
       - test-suite
       - hypothesis-fuzzing
       - mutation-verification

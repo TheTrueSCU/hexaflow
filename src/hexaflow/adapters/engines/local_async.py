@@ -72,7 +72,10 @@ def _capture_sentry_step_exception(
         return
 
     try:
-        with sentry_sdk.push_scope() as scope:
+        scope_ctx = (
+            sentry_sdk.new_scope() if hasattr(sentry_sdk, "new_scope") else sentry_sdk.push_scope()
+        )
+        with scope_ctx as scope:
             scope.set_tag("workflow_name", workflow_name)
             scope.set_tag("stage_name", stage_name)
             scope.set_tag("step_name", step_name)
