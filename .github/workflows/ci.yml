@@ -162,7 +162,7 @@ jobs:
 
       - name: Connect to Hexaqueue Cluster (Cloud Execution)
         if: needs.cluster-probe.outputs.cluster_ready == 'true'
-        uses: TheTrueSCU/hexaqueue@abe72e4be5cd26852a03a7da8a720e7b7e959a1a # v0.10.0
+        uses: TheTrueSCU/hexaqueue@df477a16f1051624f9518aa87b6d05a4c311217f # v0.11.0
         with:
           cluster-env: ${{ secrets.HEXAQUEUE_ENV }}
           auto-tunnel: "true"
