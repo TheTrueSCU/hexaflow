@@ -693,7 +693,7 @@ provides-extras = ["sentry"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "hexaqual", extras = ["all"], specifier = ">=0.10.5" },
+    { name = "hexaqual", extras = ["all"], specifier = ">=0.11.0" },
     { name = "hypothesis", specifier = ">=6.168.0" },
     { name = "playwright", specifier = ">=1.50.0" },
     { name = "pre-commit", specifier = ">=4.6.2" },
@@ -708,7 +708,7 @@ dev = [
 
 [[package]]
 name = "hexaqual"
-version = "0.10.5"
+version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "complexipy" },
@@ -725,9 +725,9 @@ dependencies = [
     { name = "rich" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/65/80/4108a6e3b9d03e10cbe5294171b9453cd71c03ca020a124965b3a30a52a7/hexaqual-0.10.5.tar.gz", hash = "sha256:11f566c1c29c291f51b30360515318e998b73b836f0d3f71cf450bf955e1484b", size = 8428988, upload-time = "2026-11-10T23:50:32.22Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/0c/7538cb177ab5d550a6c8e93941853b85cd93aab7d9c7b5154e8dd7ee7155/hexaqual-0.11.0.tar.gz", hash = "sha256:c8ba832a94cd4e9a8c78af7f0b25f4c15f909c44e2861774f73610b9eba4e7e6", size = 6628829, upload-time = "2026-11-19T08:45:12.145Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/45/68fd5ea32e5ed9b47fc6abf5299929794bfa65e0fdf49936e78029684d5b/hexaqual-0.10.5-py3-none-any.whl", hash = "sha256:f8777c9d6330a8ffe00f4d83c60203af74c13c953b1ed644bbb6954d6436358e", size = 319943, upload-time = "2026-11-10T23:50:29.75Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/66/4b90f853915d79eade897d345567c6a0f807eaebb9d3e951acfcb09596d7/hexaqual-0.11.0-py3-none-any.whl", hash = "sha256:8abbabd4f0b4bd604077c5caf0096e5aa8f456ef4c7e927245e47d6067a36e91", size = 327680, upload-time = "2026-11-19T08:45:10.6Z" },
 ]
 
 [package.optional-dependencies]
@@ -1643,15 +1643,15 @@ wheels = [
 
 [[package]]
 name = "pytest-gremlins"
-version = "1.9.0"
+version = "1.14.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "coverage" },
     { name = "pytest" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3b/b6/74470cd5b97eb0cf5f3d7e2ef7feb2d6136b5cbe2df6e070299c5faf5e7c/pytest_gremlins-1.9.0.tar.gz", hash = "sha256:12966b4d24146b46d58aa1dc8a6d0881918863ca4454a44d109b295f22d27c24", size = 4013393, upload-time = "2026-07-01T12:55:33.149Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/c8/09ea02f8a595e3c4fbd5e670d1b90ada0ac857c21bcc8ab44bd7cd70021b/pytest_gremlins-1.14.3.tar.gz", hash = "sha256:ba86f06221021e13f294d43f3efa37ec452bb4aee34b8b6e985b62906737b6ec", size = 4668008, upload-time = "2026-11-16T14:38:31.08Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f6/f7/f582cd587ebdfad6e7f6426ca3220b051d7adb41c824576851732843777a/pytest_gremlins-1.9.0-py3-none-any.whl", hash = "sha256:26997e1e6ac0cbdef70c68ddadbbd2bf93c7d41e143d9f2d84ec318b7d552b67", size = 118421, upload-time = "2026-07-01T12:55:31.708Z" },
+    { url = "https://files.pythonhosted.org/packages/80/cd/4175391a0f2903bd8aa21c0a4bd28de5cd1fd79c3034e5ecfd5e50ea5d04/pytest_gremlins-1.14.3-py3-none-any.whl", hash = "sha256:8e4d553b1a78ac38c7203b994e9dbbfb6149777a3561a425e4530ac515e4762c", size = 240076, upload-time = "2026-11-16T14:38:29.595Z" },
 ]
 
 [[package]]
