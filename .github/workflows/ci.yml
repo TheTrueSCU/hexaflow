@@ -29,7 +29,7 @@ jobs:
           uvx --python 3.13 --from "hexaflow>=0.5.0" hexaflow graph render .github/workflows/ci.yml --summary --critical-path
 
       - name: Run Quality Gate via Hexaqual
-        uses: TheTrueSCU/hexaqual@73151ca7dcd31df0f4b336ffb6312bb0fd63ff41 # v0.10.5
+        uses: TheTrueSCU/hexaqual@b2c016e75fc48e4f1c14e564b73ed9d41fe7f8c7 # v0.11.0
         with:
           sync-args: "--all-extras --dev"
 
@@ -135,13 +135,44 @@ jobs:
       - name: Run Hypothesis Fuzzing
         run: uv run hexaqual test run -P
 
-  mutation-verification:
-    name: Mutation Testing Verification
+  plan-mutations:
+    name: Plan Mutation Slices
     needs: [test-suite, cluster-probe]
     if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && !startsWith(github.head_ref, 'dependabot/')
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has_affected: ${{ steps.plan.outputs.has_affected }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Plan AST-Weighted Changed Mutation Slices
+        id: plan
+        uses: TheTrueSCU/hexaqual/.github/actions/mutate-plan@b2c016e75fc48e4f1c14e564b73ed9d41fe7f8c7 # v0.11.0
+        with:
+          mode: changed-slices
+          base-ref: ${{ github.base_ref }}
+          root: src/hexaflow
+          slices: "8"
+          max-weight: "450"
+
+  mutation-verification:
+    name: Mutation Testing (${{ matrix.name }})
+    needs: [plan-mutations, cluster-probe]
+    if: github.event_name == 'pull_request' && needs.plan-mutations.outputs.has_affected == 'true'
     continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan-mutations.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -172,11 +203,11 @@ jobs:
         if: needs.cluster-probe.outputs.cluster_ready == 'true'
         env:
           HEXAQUEUE_TIMEOUT: "3600"
-        run: uv run hexaqual mutate run -e gremlins -w auto --batch-size 10 -n auto --cluster hexaqueue
+        run: uv run hexaqual mutate run --targets "${{ matrix.targets }}" -e gremlins -w auto --batch-size 10 -n auto --cluster hexaqueue
 
       - name: Run Mutation Testing Locally (Fallback)
         if: needs.cluster-probe.outputs.cluster_ready != 'true'
-        run: uv run hexaqual mutate run -e gremlins -w auto --batch-size 10 -n auto
+        run: uv run hexaqual mutate run --targets "${{ matrix.targets }}" -e gremlins -w auto --batch-size 10 -n auto
 
       - name: Disconnect Hexaqueue Cluster Tunnel
         if: always() && needs.cluster-probe.outputs.cluster_ready == 'true'
