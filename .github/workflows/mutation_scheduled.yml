@@ -26,7 +26,7 @@ jobs:
 
       - name: Plan AST-Weighted Mutation Slices
         id: plan
-        uses: TheTrueSCU/hexaqual/.github/actions/mutate-plan@b2c016e75fc48e4f1c14e564b73ed9d41fe7f8c7 # v0.11.0
+        uses: TheTrueSCU/hexaqual/.github/actions/mutate-plan@6117ce25b1d39768f22396a55d13103abee88926 # v0.12.1
         with:
           mode: slices
           root: src/hexaflow
@@ -82,21 +82,27 @@ jobs:
 
       - name: Connect to Hexaqueue Cluster (Cloud Execution)
         if: steps.cluster-probe.outputs.status == 'healthy'
-        uses: TheTrueSCU/hexaqueue@df477a16f1051624f9518aa87b6d05a4c311217f # v0.11.0
+        uses: TheTrueSCU/hexaqueue@f494760fe17d82d9009d352ee0a827a2d5277cca # v0.12.0
         with:
           cluster-env: ${{ secrets.HEXAQUEUE_ENV }}
+          version: ">=0.12.0"
           auto-tunnel: "true"
           step-summary: "false"
 
       - name: Execute Mutation Sweep
         env:
-          HEXAQUEUE_TIMEOUT: "3600"
+          HEXAQUEUE_TIMEOUT: "3300"
+          HEXAQUEUE_RUN_ID_FILE: ${{ runner.temp }}/hexaqueue-active-run.id
         run: |
           CLUSTER_FLAGS=""
           if [ "${{ steps.cluster-probe.outputs.status }}" = "healthy" ]; then
             CLUSTER_FLAGS="--cluster hexaqueue"
           fi
           uv run hexaqual mutate run --targets "${{ matrix.targets }}" -e gremlins -w auto --batch-size 10 -n auto $CLUSTER_FLAGS
+
+      - name: Cancel Orphaned Hexaqueue Mutation Run (On Failure/Cancel)
+        if: (cancelled() || failure()) && steps.cluster-probe.outputs.status == 'healthy'
+        run: python3 .github/scripts/cancel_orphaned_workload.py --kind run --id-file "${{ runner.temp }}/hexaqueue-active-run.id"
 
       - name: Disconnect Hexaqueue Cluster Tunnel
         if: always() && steps.cluster-probe.outputs.status == 'healthy'

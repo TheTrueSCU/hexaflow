@@ -8,6 +8,10 @@ on:
 
 permissions: read-all
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   # =========================================================================
   # Stage 1: Fast Quality Gate (Fail-Fast Static Checks & Linting)
@@ -29,7 +33,7 @@ jobs:
           uvx --python 3.13 --from "hexaflow>=0.5.0" hexaflow graph render .github/workflows/ci.yml --summary --critical-path
 
       - name: Run Quality Gate via Hexaqual
-        uses: TheTrueSCU/hexaqual@b2c016e75fc48e4f1c14e564b73ed9d41fe7f8c7 # v0.11.0
+        uses: TheTrueSCU/hexaqual@6117ce25b1d39768f22396a55d13103abee88926 # v0.12.1
         with:
           sync-args: "--all-extras --dev"
 
@@ -48,19 +52,26 @@ jobs:
     outputs:
       cluster_ready: ${{ steps.probe.outputs.cluster_ready }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
       - name: Probe Hexaqueue Cloud Fleet
         id: probe
-        continue-on-error: true
-        env:
-          HEXAQUEUE_ENV: ${{ secrets.HEXAQUEUE_ENV }}
-        run: |
-          if [ -z "$HEXAQUEUE_ENV" ]; then
-            echo "cluster_ready=false" >> "$GITHUB_OUTPUT"
-            echo "Hexaqueue cluster secrets not configured - running locally"
-            exit 0
-          fi
-          echo "cluster_ready=true" >> "$GITHUB_OUTPUT"
-          echo "Hexaqueue cluster credentials detected"
+        uses: TheTrueSCU/hexaqueue@f494760fe17d82d9009d352ee0a827a2d5277cca # v0.12.0
+        with:
+          cluster-env: ${{ secrets.HEXAQUEUE_ENV }}
+          version: ">=0.12.0"
+          probe-only: "true"
+          step-summary: "true"
 
   # =========================================================================
   # Stage 2: Unit / Integration Tests & Code Coverage
@@ -155,7 +166,7 @@ jobs:
 
       - name: Plan AST-Weighted Changed Mutation Slices
         id: plan
-        uses: TheTrueSCU/hexaqual/.github/actions/mutate-plan@b2c016e75fc48e4f1c14e564b73ed9d41fe7f8c7 # v0.11.0
+        uses: TheTrueSCU/hexaqual/.github/actions/mutate-plan@6117ce25b1d39768f22396a55d13103abee88926 # v0.12.1
         with:
           mode: changed-slices
           base-ref: ${{ github.base_ref }}
@@ -193,21 +204,27 @@ jobs:
 
       - name: Connect to Hexaqueue Cluster (Cloud Execution)
         if: needs.cluster-probe.outputs.cluster_ready == 'true'
-        uses: TheTrueSCU/hexaqueue@df477a16f1051624f9518aa87b6d05a4c311217f # v0.11.0
+        uses: TheTrueSCU/hexaqueue@f494760fe17d82d9009d352ee0a827a2d5277cca # v0.12.0
         with:
           cluster-env: ${{ secrets.HEXAQUEUE_ENV }}
+          version: ">=0.12.0"
           auto-tunnel: "true"
           step-summary: "false"
 
       - name: Run Mutation Testing via Hexaqueue Cloud
         if: needs.cluster-probe.outputs.cluster_ready == 'true'
         env:
-          HEXAQUEUE_TIMEOUT: "3600"
+          HEXAQUEUE_TIMEOUT: "3300"
+          HEXAQUEUE_RUN_ID_FILE: ${{ runner.temp }}/hexaqueue-active-run.id
         run: uv run hexaqual mutate run --targets "${{ matrix.targets }}" -e gremlins -w auto --batch-size 10 -n auto --cluster hexaqueue
 
       - name: Run Mutation Testing Locally (Fallback)
         if: needs.cluster-probe.outputs.cluster_ready != 'true'
         run: uv run hexaqual mutate run --targets "${{ matrix.targets }}" -e gremlins -w auto --batch-size 10 -n auto
+
+      - name: Cancel Orphaned Hexaqueue Mutation Run (On Failure/Cancel)
+        if: (cancelled() || failure()) && needs.cluster-probe.outputs.cluster_ready == 'true'
+        run: python3 .github/scripts/cancel_orphaned_workload.py --kind run --id-file "${{ runner.temp }}/hexaqueue-active-run.id"
 
       - name: Disconnect Hexaqueue Cluster Tunnel
         if: always() && needs.cluster-probe.outputs.cluster_ready == 'true'
