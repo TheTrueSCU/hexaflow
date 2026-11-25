@@ -82,10 +82,10 @@ jobs:
 
       - name: Connect to Hexaqueue Cluster (Cloud Execution)
         if: steps.cluster-probe.outputs.status == 'healthy'
-        uses: TheTrueSCU/hexaqueue@f494760fe17d82d9009d352ee0a827a2d5277cca # v0.12.0
+        uses: TheTrueSCU/hexaqueue@1e7b3c4625c82bece17dbc9eafc72664e4bd501c # v0.12.1
         with:
           cluster-env: ${{ secrets.HEXAQUEUE_ENV }}
-          version: ">=0.12.0"
+          version: ">=0.12.1"
           auto-tunnel: "true"
           step-summary: "false"
 
