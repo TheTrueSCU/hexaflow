@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-11-24
+
+### Changed
+- Adopted `hexaqual[all]>=0.12.1` and `TheTrueSCU/hexaqueue` `v0.12.1` in CI workflows (`ci.yml`, `mutation_scheduled.yml`).
+- Hardened CI job cancellation and orphaned Hexaqueue workload cleanup via concurrency groups, `HEXAQUEUE_RUN_ID_FILE`, `HEXAQUEUE_TIMEOUT`, and `.github/scripts/cancel_orphaned_workload.py`.
+- Added the **Tested on Hexaqueue** cross-promotion badge to `README.md`.
+- Split `.github/workflows/docs.yml` GitHub Pages deployment into separate `build` and `deploy` jobs to prevent single-job artifact upload/deploy races.
+
 ## [0.5.3] - 2026-11-10
 
 ### Refactored & Governance
