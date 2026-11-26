@@ -24,7 +24,7 @@ flowchart TD
     end
 
     subgraph Resumption ["Resumption Run (hf resume)"]
-        SUSP -.-> RES["Operator heals disk partition<br/><code>hf resume &lt;run_id&gt;</code>"]
+        SUSP -.-> RES["Operator heals disk partition<br/><code>hf resume &lt;run_id&gt; &lt;target&gt;</code>"]
         RES --> LOAD["Load Checkpoints from SQLite"]
         LOAD --> SKIP["Stage 1 (download_dataset)<br/><b>SKIPPED (Already Completed)</b>"]
         SKIP --> S2_RETRY["Stage 2 (normalize_features)<br/><b>EXECUTED</b>"]

@@ -16,7 +16,7 @@ uv add hexaflow
 pip install hexaflow
 ```
 
-Hexaflow requires Python 3.13+ and has minimal dependencies (Pydantic and Typer/Rich for CLI).
+Hexaflow requires Python 3.12+ and has minimal runtime dependencies (Pydantic, PyYAML, Typer, and Rich).
 
 ---
 
@@ -36,7 +36,7 @@ wf = Workflow(
 
 
 # 2. Define sequential steps
-@wf.step("fetch_data", retries=RetryPolicy(max_attempts=3, backoff_seconds=1.0))
+@wf.step("fetch_data", retries=RetryPolicy(max_attempts=3, initial_delay_seconds=1.0))
 def fetch_data(ctx) -> dict:
     print("Fetching remote customer data...")
     return {"raw_records": 1500, "source": "s3://raw-bucket/customers.json"}
@@ -82,7 +82,7 @@ Workflow Run ID: run_8f31b2e4
 
 ## 💾 Durable State & Checkpointing
 
-By default, workflows execute in memory. To survive process restarts or container failures, configure an **`SqliteStateStore`**:
+By default, workflows persist checkpoints with **`SqliteStateStore()`** at `.hexaflow/state.db`. Pass `InMemoryStateStore()` for ephemeral in-memory execution, or point **`SqliteStateStore`** at an explicit database path:
 
 ```python
 from pathlib import Path
@@ -104,7 +104,7 @@ Each step's completion status, output payload, and timing metadata are atomicall
 
 ## 🔄 Resuming from Process Failures
 
-If a step raises an uncaught exception, the workflow transitions to `FAILED`, recording all successful step checkpoints:
+If a step raises an uncaught exception, that step checkpoint is marked `FAILED` and the workflow transitions to `SUSPENDED`, preserving all prior successful step checkpoints:
 
 ```python
 # Later, after fixing network or downstream credentials:
@@ -163,14 +163,15 @@ def merge_results(ctx) -> dict:
 Hexaflow provides a built-in Typer CLI:
 
 ```bash
-# Execute a workflow from module path
-hexaflow run pipeline:wf
+# Execute a workflow from file path
+hexaflow run pipeline.py:wf
 
-# Inspect past execution runs stored in SQLite
-hexaflow inspect --db workflows.db
+# Check run status and inspect a step stored in SQLite
+hexaflow status <run_id> --db workflows.db
+hexaflow inspect <run_id> fetch_data --db workflows.db
 
-# Resume a failed workflow run
-hexaflow resume run_8f31b2e4 --db workflows.db
+# Resume a suspended workflow run
+hexaflow resume <run_id> pipeline.py:wf --db workflows.db
 ```
 
 ---
