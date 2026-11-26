@@ -34,7 +34,7 @@ Usage: hexaflow [OPTIONS] COMMAND [ARGS]...
  Lightweight, embeddable Python workflow engine with checkpointed resumption.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                  │
+│ --help        <bool>  Show this message and exit.                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
 │ status   Display execution status, stages, and step checkpoints.             │
@@ -65,9 +65,9 @@ Usage: hexaflow abort [OPTIONS] {run_id} {target}
 │                         [required]                                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --db          <str>  Path to SQLite state database.                          │
-│                      [default: .hexaflow/state.db]                           │
-│ --help               Show this message and exit.                             │
+│ --db          <str>   Path to SQLite state database.                         │
+│                       [default: .hexaflow/state.db]                          │
+│ --help        <bool>  Show this message and exit.                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -79,7 +79,7 @@ Usage: hexaflow graph [OPTIONS] COMMAND [ARGS]...
  Workflow DAG inspection, analysis, and visualization commands.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                  │
+│ --help        <bool>  Show this message and exit.                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
 │ render  Render a workflow dependency graph to Mermaid, DOT, ASCII, or JSON.  │
@@ -101,9 +101,9 @@ Usage: hexaflow graph info [OPTIONS] {target}
 │                         [required]                                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --params  -p      <str>  JSON string of keyword parameters passed to         │
-│                          workflow factory functions.                         │
-│ --help                   Show this message and exit.                         │
+│ --params  -p      <str>   JSON string of keyword parameters passed to        │
+│                           workflow factory functions.                        │
+│ --help            <bool>  Show this message and exit.                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -124,17 +124,17 @@ Usage: hexaflow graph render [OPTIONS] {target}
 │ --format         -f      <str>   Renderer format ('mermaid', 'dot', 'ascii', │
 │                                  'json').                                    │
 │                                  [default: mermaid]                          │
-│ --dry-run                        Execute dry-run simulation in memory and    │
+│ --dry-run                <bool>  Execute dry-run simulation in memory and    │
 │                                  render materialized dynamic DAG.            │
 │ --params         -p      <str>   JSON string of keyword parameters passed to │
 │                                  workflow factory functions.                 │
 │ --output         -o      <path>  Optional destination file path to write     │
 │                                  rendered output to.                         │
-│ --summary        -s              Append rendered diagram to                  │
+│ --summary        -s      <bool>  Append rendered diagram to                  │
 │                                  $GITHUB_STEP_SUMMARY markdown.              │
-│ --critical-path  -c              Visually highlight the critical path in the │
+│ --critical-path  -c      <bool>  Visually highlight the critical path in the │
 │                                  rendered diagram.                           │
-│ --help                           Show this message and exit.                 │
+│ --help                   <bool>  Show this message and exit.                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -150,9 +150,9 @@ Usage: hexaflow inspect [OPTIONS] {run_id} {step_name}
 │ *    step_name      <str>  Step identifier to inspect. [required]            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --db          <str>  Path to SQLite state database.                          │
-│                      [default: .hexaflow/state.db]                           │
-│ --help               Show this message and exit.                             │
+│ --db          <str>   Path to SQLite state database.                         │
+│                       [default: .hexaflow/state.db]                          │
+│ --help        <bool>  Show this message and exit.                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -169,9 +169,9 @@ Usage: hexaflow restart [OPTIONS] {run_id} {target}
 │                         [required]                                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --db          <str>  Path to SQLite state database.                          │
-│                      [default: .hexaflow/state.db]                           │
-│ --help               Show this message and exit.                             │
+│ --db          <str>   Path to SQLite state database.                         │
+│                       [default: .hexaflow/state.db]                          │
+│ --help        <bool>  Show this message and exit.                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -188,9 +188,9 @@ Usage: hexaflow resume [OPTIONS] {run_id} {target}
 │                         [required]                                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --db          <str>  Path to SQLite state database.                          │
-│                      [default: .hexaflow/state.db]                           │
-│ --help               Show this message and exit.                             │
+│ --db          <str>   Path to SQLite state database.                         │
+│                       [default: .hexaflow/state.db]                          │
+│ --help        <bool>  Show this message and exit.                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -206,9 +206,9 @@ Usage: hexaflow run [OPTIONS] {target}
 │                         [required]                                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --db          <str>  Path to SQLite state database.                          │
-│                      [default: .hexaflow/state.db]                           │
-│ --help               Show this message and exit.                             │
+│ --db          <str>   Path to SQLite state database.                         │
+│                       [default: .hexaflow/state.db]                          │
+│ --help        <bool>  Show this message and exit.                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -223,8 +223,8 @@ Usage: hexaflow status [OPTIONS] {run_id}
 │ *    run_id      <str>  Workflow execution run ID. [required]                │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --db          <str>  Path to SQLite state database.                          │
-│                      [default: .hexaflow/state.db]                           │
-│ --help               Show this message and exit.                             │
+│ --db          <str>   Path to SQLite state database.                         │
+│                       [default: .hexaflow/state.db]                          │
+│ --help        <bool>  Show this message and exit.                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```

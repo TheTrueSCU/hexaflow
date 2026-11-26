@@ -124,7 +124,7 @@ hf run examples/order_pipeline.py:wf
 hf status <run_id>
 
 # Inspect step inputs, outputs, or error tracebacks
-hf inspect <run_id> create_shipping_label
+hf inspect <run_id> create_shipment_label
 
 # Visualize workflow DAG (Mermaid, DOT, ASCII, JSON)
 hf graph render examples/order_pipeline.py:wf --format mermaid
@@ -159,6 +159,7 @@ hf abort <run_id> examples/order_pipeline.py:wf
 - **`hexaflow`** *(this repository)*: Lightweight, zero-daemon, localhost-first DAG workflow engine.
 - **`hexastack`**: Monorepo framework providing CQRS, Event Sourcing, FastAPI, and out-of-the-box DevTools.
 - **`hexaqueue`**: Flagship distributed batch & HPC cluster scheduler.
+- **`hexaqual`**: Unified quality, governance, testing, and CI enforcement plane.
 
 ---
 

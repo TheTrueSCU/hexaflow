@@ -2,7 +2,7 @@
 
 > **Lightweight, embeddable Python workflow engine with stages, steps, splits, joins, and checkpointed resumption.**
 
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-green.svg)](https://github.com/TheTrueSCU/hexaflow/blob/main/LICENSE)
 [![Architecture: Hexagonal](https://img.shields.io/badge/architecture-hexagonal-emerald.svg)](architecture.md)
 [![Zero-Daemon](https://img.shields.io/badge/infra-zero--daemon-purple.svg)](getting-started.md)
@@ -18,7 +18,7 @@ Most modern workflow orchestrators (Airflow, Temporal, Celery, Prefect) require 
 ```mermaid
 graph TD
     subgraph DrivingAdapters ["Driving Adapters (Inbound / Control)"]
-        CLI["hexaflow-cli (Typer CLI)"]
+        CLI["hexaflow.cli (Typer CLI)"]
         API["In-Process Python App / FastAPI"]
         HQ["Hexaqueue Distributed Engine"]
     end
@@ -26,14 +26,14 @@ graph TD
     subgraph Hexagon ["Hexagonal Core"]
         WF["Workflow Definition & DAG Resolver"]
         CTX["StepContext & Input Aggregator"]
-        SM["Execution State Machine (Pending -> Running -> Completed/Failed)"]
+        SM["Execution State Machine (Pending -> Running -> Completed/Suspended/Cancelled)"]
     end
 
     subgraph DrivenAdapters ["Driven Adapters (Outbound / Storage & Execution)"]
-        ENGINE["LocalAsyncWorkflowEngine / Sync Engine"]
+        ENGINE["AsyncioWorkflowEngine (LocalAsyncWorkflowEngine)"]
         MEM_STORE["InMemoryStateStore (Testing & Transient)"]
         SQL_STORE["SqliteStateStore (Durable Checkpoints & Spillover)"]
-        STACK_STORE["Hexastack DB / Redis Store (Enterprise)"]
+        STACK_STORE["Hexastack DB Persistence (Enterprise)"]
     end
 
     CLI --> WF
@@ -57,7 +57,7 @@ graph TD
 - **💾 Crash-Resilient Checkpointing**: State is committed to SQLite or in-memory stores after each step. If your container crashes or restarts, call `wf.resume(run_id)` to pick up exactly where execution halted.
 - **🔀 Concurrent Fan-Out & Join Barriers**: Split execution concurrently across independent steps and join results deterministically before advancing.
 - **🔁 Transient Retries & Backoff**: Fine-grained retry policies with exponential backoff and jitter per step.
-- **↩️ Compensation Rollbacks**: Declare reverse compensation handlers that run automatically if downstream steps fail.
+- **↩️ Compensation Rollbacks**: Declare reverse compensation handlers via `compensation=` that unwind in reverse completion order when explicitly aborting a workflow (`wf.abort(run_id)` or `hexaflow abort`).
 - **🌐 Hexa Family Interoperability**: Embeds directly into [`hexastack-flow`](https://github.com/TheTrueSCU/hexastack) for enterprise database persistence, and scales to distributed clusters via [`hexaqueue`](https://github.com/TheTrueSCU/hexaqueue).
 
 ---
@@ -107,4 +107,9 @@ if __name__ == "__main__":
 - [Getting Started](getting-started.md) — Step-by-step setup, first workflow, checkpointing.
 - [Architecture & Design](architecture.md) — Hexagonal layers, state store SPI, and state transitions.
 - [API & DSL Reference](api-reference.md) — Decorators, execution modes, retry policies, and context.
+- [Guide: Memento Crash Recovery](guides/memento.md) — Durable checkpoints, status inspection, and resumption.
+- [Guide: Step Middleware Pipeline](guides/middleware.md) — Onion-layered interceptors, timing, and mock fallbacks.
+- [Guide: Saga Compensations](guides/sagas.md) — Reversible workflows and LIFO rollback on abort.
 - [Tutorial: Order Fulfillment Pipeline](tutorials/01-order-fulfillment-pipeline.md) — End-to-end runnable walkthrough.
+- [Architecture Decisions (ADRs)](decisions.md) — Foundational design choices and invariants.
+- [Ecosystem Architecture](ecosystem.md) — How `hexaflow` integrates across the Hexa family.

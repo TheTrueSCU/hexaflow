@@ -10,11 +10,11 @@
 
 | ADR ID | Title | Date / Milestone | Status | Key Invariant |
 |---|---|---|---|---|
-| [**ADR-001**](#adr-001-strict-hexagonal-layer-boundaries--pure-domain-workflows) | Strict Hexagonal Layer Boundaries & Pure Domain Workflows | 2026-08-20 (`v0.1.0`) | **Accepted** | `domain/` has 0 external dependencies and 0 I/O; DAG definitions are pure data structures. |
-| [**ADR-002**](#adr-002-reversible-step-execution--saga-compensation-pairings) | Reversible Step Execution & Saga Compensation Pairings | 2026-09-01 (`v0.2.0`) | **Accepted** | Steps pair forward execution with backward `on_failure` compensations for reliable saga rollbacks. |
-| [**ADR-003**](#adr-003-declarative-workflow-model--lossless-schema-serialization) | Declarative Workflow Model & Lossless Schema Serialization | 2026-09-10 (`v0.3.0`) | **Accepted** | Pydantic v2 domain schemas serialize losslessly to JSON/YAML for cross-process orchestration. |
-| [**ADR-004**](#adr-004-anti-fake-pass-exercise-gates--boundary-mutation-auditing) | Anti-Fake-Pass Exercise Gates & Boundary Mutation Auditing | 2026-10-18 (`v0.4.0`) | **Accepted** | Zero test collection is a fatal failure; mutation testing audits workflow failure handler efficacy. |
-| [**ADR-005**](#adr-005-topological-dag-pipeline-visualization--critical-path-analysis) | Topological DAG Pipeline Visualization & Critical Path Analysis | 2026-10-14 (`v0.4.0`) | **Accepted** | GitHub Actions and workflow DAGs render directly into Mermaid graphs and compute critical path bottlenecks. |
+| [**ADR-001**](#adr-001-strict-hexagonal-layer-boundaries-pure-domain-workflows) | Strict Hexagonal Layer Boundaries & Pure Domain Workflows | 2026-08-20 (`v0.1.0`) | **Accepted** | Core `domain/` has zero I/O or engine/storage framework dependencies; enforced via `import-linter`. |
+| [**ADR-002**](#adr-002-reversible-step-execution-saga-compensation-pairings) | Reversible Step Execution & Saga Compensation Pairings | 2026-09-01 (`v0.2.0`) | **Accepted** | Steps pair forward execution with `compensation=` handlers that unwind in reverse completion order on explicit `abort()`. |
+| [**ADR-003**](#adr-003-declarative-workflow-model-runtime-state-serialization) | Declarative Workflow Model & Runtime State Serialization | 2026-09-10 (`v0.3.0`) | **Accepted** | Runtime state and checkpoints serialize to JSON for resumption, while Pydantic v2 DAG schemas enable static analysis. |
+| [**ADR-004**](#adr-004-anti-fake-pass-exercise-gates-boundary-mutation-auditing) | Anti-Fake-Pass Exercise Gates & Boundary Mutation Auditing | 2026-10-18 (`v0.4.0`) | **Accepted** | Zero test collection is a fatal failure; mutation testing audits workflow failure handler efficacy. |
+| [**ADR-005**](#adr-005-topological-dag-pipeline-visualization-critical-path-analysis) | Topological DAG Pipeline Visualization & Critical Path Analysis | 2026-10-14 (`v0.4.0`) | **Accepted** | GitHub Actions and workflow DAGs render directly into Mermaid graphs and compute critical path bottlenecks. |
 
 ---
 
@@ -25,12 +25,12 @@
 - **Context & Problem Statement**:
   Workflow engines frequently couple DAG scheduling, step definition, and business rules directly with external execution runners, multiprocessing pools, or storage backends. This entanglement makes it impossible to run workflows deterministically in memory during tests without spinning up databases or subprocesses.
 - **Decision**:
-  Enforce strict 4-tier Hexagonal layer boundaries:
-  - `domain/`: Pure workflow DAG models, step definitions, transition rules, and state machines with **0** external framework dependencies and **0** disk/network I/O.
-  - `ports/`: Pure abstract base interfaces (`abc.ABC`) defining storage adapters, execution engines, and event publishers.
-  - `adapters/`: Concrete technological implementations (asyncio runners, disk storage, memory state backends, Rich telemetry).
-  - `dsl/`: Declarative builder APIs that construct domain DAGs without leaking implementation details.
-  - `cli/`: Typer command dispatchers that render, validate, and execute workflows from terminal entrypoints.
+  Enforce strict 3-layer Hexagonal boundaries (`adapters` -> `ports` -> `domain`) alongside declarative `dsl/` and driving `cli/` layers:
+  - `domain/`: Workflow DAG models (`WorkflowDefinition`, `StageDefinition`, `StepDefinition` using Pydantic v2), `WorkflowGraph`, `RetryPolicy`, and state models with **0** disk/network I/O or execution engine dependencies.
+  - `ports/`: Abstract interfaces defining execution (`WorkflowEnginePort`), persistence (`WorkflowStateStorePort`), graph rendering (`GraphRendererPort`), and middleware (`StepMiddlewarePort` `Protocol`).
+  - `adapters/`: Concrete implementations (`AsyncioWorkflowEngine`, `InMemoryStateStore`, `SqliteStateStore`, step middlewares, and Mermaid/DOT/ASCII/JSON renderers + GitHub Actions YAML loader).
+  - `dsl/`: Declarative builder API (`Workflow`) constructing validated domain DAGs without leaking implementation details.
+  - `cli/`: Typer and Rich command dispatchers (`hexaflow` / `hf`) that render, validate, inspect, and execute workflows from terminal entrypoints.
 - **The Invariant ("The Why")**:
   A workflow DAG is a pure mathematical graph. Step sequencing, condition branching, and state transitions must be completely testable in microsecond in-memory tests.
 - **Alternatives Considered & Rejected**:
@@ -47,30 +47,30 @@
 - **Context & Problem Statement**:
   Multi-step operations (such as payment processing, order dispatch, or multi-repo deployments) can fail at any stage. In distributed environments without two-phase commit (2PC), partial execution leaves systems in corrupt, half-finished states.
 - **Decision**:
-  Implement the distributed Saga pattern directly within step definitions. Each forward step execution can optionally declare an `on_failure` compensation hook. When a DAG execution halts due to an unhandled step error, the engine traverses the reverse topological execution history and executes compensations in reverse order.
+  Implement the distributed Saga pattern directly within step definitions. Each forward step execution can declare a `compensation` callable via `@wf.step(..., compensation=...)` or `@wf.map_step(...)`. When a DAG execution halts due to an unhandled step error, it transitions to `WorkflowStatus.SUSPENDED` preserving checkpoints; calling `wf.abort(run_id)` or `hexaflow abort` unwinds completed step compensations in reverse completion order (LIFO).
 - **The Invariant ("The Why")**:
   Every side-effecting action modeled in a Hexaflow workflow must have an explicit compensation or declared point-of-no-return idempotency rule.
 - **Alternatives Considered & Rejected**:
   - *Distributed transactions (XA/2PC)*: Rejected due to prohibitive latency, database locking, and failure in cross-service REST/gRPC environments.
 - **Enforcement Mechanism**:
-  - Compensation reversal verification tests in `tests/unit/test_saga.py`.
+  - Compensation reversal verification tests in `tests/e2e/test_saga_compensation.py`, `tests/unit/adapters/engines/test_local_async.py`, and `tests/properties/test_dag_oracle.py`.
 
 ---
 
-### ADR-003: Declarative Workflow Model & Lossless Schema Serialization
+### ADR-003: Declarative Workflow Model & Runtime State Serialization
 
 - **Date & Milestone**: 2026-09-10 (`v0.3.0`)
 - **Status**: Accepted
 - **Context & Problem Statement**:
   Configuring workflows solely in imperative Python code prevents visualization tools, web DevTools, and AI coding assistants from inspecting or validating workflow structures prior to execution.
 - **Decision**:
-  Standardize the workflow DAG representation on declarative Pydantic v2 models that support lossless round-trip serialization to JSON and YAML. Workflow graphs can be authored either via Python fluent builder DSL or imported directly from YAML/JSON workflow specifications.
+  Standardize the workflow DAG representation (`WorkflowDefinition`, `StageDefinition`, `StepDefinition`) and runtime state (`WorkflowExecutionState`, `CheckpointRecord`, `WorkflowMemento`) on Pydantic v2 models. While workflow definitions hold Python step/compensation callables, their graph structure (`WorkflowGraph`) is statically introspectable and exports cleanly to JSON/Mermaid/DOT/ASCII, runtime execution state and checkpoints serialize cleanly to JSON for checkpointing/resumption, and `GitHubActionsYamlLoader` imports GitHub Actions YAML workflows for DAG visualization.
 - **The Invariant ("The Why")**:
-  A workflow's graph structure must be introspectable, statically verifiable, and visualizable without executing any user step code.
+  A workflow's graph structure must be introspectable, statically verifiable, and visualizable without executing any user step code, while runtime state serializes deterministically across restarts.
 - **Alternatives Considered & Rejected**:
   - *Opaque Python generators / coroutines*: Rejected because inspecting execution graphs from arbitrary generator bytecodes is fragile and cannot be shared across polyglot tooling.
 - **Enforcement Mechanism**:
-  - Property-based schema serialization tests using Hypothesis.
+  - Property-based Hypothesis equivalence and DAG invariant tests in `tests/properties/test_dag_oracle.py` and `tests/properties/test_dag_properties.py`.
 
 ---
 

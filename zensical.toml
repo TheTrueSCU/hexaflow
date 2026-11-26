@@ -8,9 +8,15 @@ nav = [
     { "Getting Started" = "getting-started.md" },
     { "Architecture & Design" = "architecture.md" },
     { "API & DSL Reference" = "api-reference.md" },
+    { "Guides" = [
+        { "Memento Crash Recovery" = "guides/memento.md" },
+        { "Step Middleware Pipeline" = "guides/middleware.md" },
+        { "Saga Compensations" = "guides/sagas.md" }
+    ]},
     { "Tutorials" = [
         { "Order Fulfillment Pipeline" = "tutorials/01-order-fulfillment-pipeline.md" }
     ]},
+    { "Architecture Decisions (ADRs)" = "decisions.md" },
     { "Ecosystem Architecture" = "ecosystem.md" }
 ]
 

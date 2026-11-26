@@ -1,3 +1,4 @@
+<!-- Canonical source: TheTrueSCU/hexaqual/docs/ecosystem.md — keep version-free; update there first when adding, removing, or rewiring packages across hexa-* repos (e.g. hexaqueue-executors) and mirror identically. -->
 # Hexa Ecosystem Architecture
 
 > **The Four Pillars of the Hexa Family**: A unified suite of specialized, highly-cohesive Python projects enforcing hexagonal boundaries, predictable state, and zero-compromise engineering discipline from localhost development to distributed cluster orchestration.
@@ -13,14 +14,14 @@ graph TD
     classDef hf fill:#059669,stroke:#047857,stroke-width:2px,color:#ffffff;
     classDef hqual fill:#d97706,stroke:#b45309,stroke-width:2px,color:#ffffff;
 
-    HF["📦 hexaflow (v0.3.0)<br/>Resumable In-Process DAG Engine"]:::hf
-    HQ["⚡ hexaqueue (v0.3.0)<br/>Distributed HPC Batch Scheduler"]:::hq
-    HS["🏛️ hexastack (v0.6.0)<br/>Hexagonal Monorepo (17 Packages)<br/>CQRS • gRPC • DB • Auth"]:::hs
-    HQUAL["🛠️ hexaqual (v0.5.1)<br/>Unified Quality, Governance & CI Plane"]:::hqual
+    HQ["⚡ hexaqueue<br/>Distributed HPC Batch Scheduler"]:::hq
+    HS["🏛️ hexastack<br/>Hexagonal Monorepo (18 Packages)<br/>CQRS • gRPC • DB • Auth"]:::hs
+    HF["📦 hexaflow<br/>Resumable In-Process DAG Engine"]:::hf
+    HQUAL["🛠️ hexaqual<br/>Unified Quality, Governance & CI Plane"]:::hqual
 
+    HQ -->|"consumes core & CQRS"| HS
     HQ -->|"executes DAG workflows"| HF
     HS -->|"consumes in hexastack-flow"| HF
-    HQ -->|"consumes core & CQRS"| HS
     HQUAL -. "governs via CI & pre-commit" .-> HQ
     HQUAL -. "governs via CI & pre-commit" .-> HS
     HQUAL -. "governs via CI & pre-commit" .-> HF
@@ -28,9 +29,9 @@ graph TD
 
 | Pillar | Focus & Invariants | Key Capabilities |
 |---|---|---|
-| [**`hexaflow`**](https://dopplereffect.us/hexaflow/) | In-Process Workflow DAG Engine | Zero-external-dependency (stdlib + Pydantic) DAG executor with dynamic collection fan-out (`@wf.map_step`), automatic dependency inference, cycle detection, and SQLite state checkpointing. |
-| [**`hexastack`**](https://dopplereffect.us/hexastack/) | Enterprise Application Framework | 17 subpackages implementing pure Hexagonal Architecture (Ports & Adapters), CQRS dispatching, database repositories, transactional outbox with NATS JetStream, multi-protocol transports (FastAPI, gRPC, GraphQL, CLI), and NiceGUI/Textual DevTools. |
-| [**`hexaqueue`**](https://dopplereffect.us/hexaqueue/) | Distributed Batch Scheduler | High-throughput, distributed execution and scheduling plane for HPC batch workloads, runners (GitHub, GitLab, Kueue), and multi-step workflows with split/join barrier resolution. |
+| [**`hexastack`**](https://dopplereffect.us/hexastack/) | Enterprise Application Framework | 18 subpackages implementing pure Hexagonal Architecture (Ports & Adapters), CQRS dispatching, database repositories, transactional outbox with NATS JetStream, multi-protocol transports (FastAPI, gRPC, GraphQL, CLI), NiceGUI DevTools, and Hexaqual governance (`hexastack-qual`). |
+| [**`hexaqueue`**](https://dopplereffect.us/hexaqueue/) | Distributed Batch Scheduler | High-throughput, distributed execution and scheduling plane for HPC batch workloads, runners (GitHub, GitLab, Kueue), distributed pytest slicing (`pytest-hexaqueue`), and multi-step workflows with split/join barrier resolution. |
+| [**`hexaflow`**](https://dopplereffect.us/hexaflow/) | In-Process Workflow DAG Engine | Lightweight, zero-daemon DAG executor (Pydantic, PyYAML, Typer, Rich) with dynamic collection fan-out (`@wf.map_step`), automatic dependency inference, cycle detection, and SQLite state checkpointing. |
 | [**`hexaqual`**](https://dopplereffect.us/hexaqual/) | Unified Quality & Governance Plane | Standalone developer toolsuite providing turnkey pre-commit hooks, CI composite actions, cognitive complexity enforcement, test parity checks, mutation testing triage, and architectural boundary verification. |
 
 ---
@@ -86,11 +87,12 @@ flowchart TB
             hexaqueue_scanner["-scanner"]:::feature
         end
 
-        subgraph hq_runners["Runners & Pipelines"]
+        subgraph hq_runners["Runners & CI Drivers"]
             hexaqueue_github_runner["-github-runner"]:::runner
             hexaqueue_gitlab_runner["-gitlab-runner"]:::runner
             hexaqueue_kueue["-kueue"]:::runner
             hexaqueue_workflow["-workflow"]:::runner
+            pytest_hexaqueue["pytest-hexaqueue"]:::runner
         end
 
         hexaqueue_core["-core"]:::foundation
@@ -120,6 +122,7 @@ flowchart TB
             hexastack_events["-events"]:::infra
             hexastack_logging["-logging"]:::infra
             hexastack_otel["-otel"]:::infra
+            hexastack_qual["-qual"]:::infra
         end
 
         subgraph hs_base["Foundation"]
@@ -144,11 +147,12 @@ flowchart TB
     %% 1. Hexaqueue Internal Wiring
     hq_services --> hexaqueue_core
     hq_runners --> hexaqueue_core
-    hexaqueue_cli --> hexaqueue_server
-    hexaqueue_cli --> hexaqueue_worker
-    hexaqueue_cli --> hexaqueue_workflow
-    hexaqueue_workflow --> hexaqueue_server
-    hexaqueue_workflow --> hexaqueue_worker
+    hexaqueue_cli --> hexaqueue_server & hexaqueue_worker & hexaqueue_workflow
+    hexaqueue_dashboard --> hexaqueue_collateral & hexaqueue_server & hexaqueue_worker
+    hexaqueue_server --> hexaqueue_collateral & hexaqueue_monitor & hexaqueue_github_runner
+    hexaqueue_worker --> hexaqueue_collateral
+    hexaqueue_workflow --> hexaqueue_server & hexaqueue_worker
+    pytest_hexaqueue --> hexaqueue_collateral
 
     %% 2. Hexastack Internal Wiring
     hs_extensions & hs_transports & hs_infra --> hexastack_cqrs
@@ -157,20 +161,26 @@ flowchart TB
 
     %% 3. Cross-Repo Links: Hexaqueue -> Hexastack
     hexaqueue_core --> hexastack_core & hexastack_cqrs
-    hexaqueue_cli --> hexastack_cli & hexastack_grpc & hexastack_cqrs & hexastack_core
+    hexaqueue_cli --> hexastack_auth & hexastack_cli & hexastack_core & hexastack_cqrs & hexastack_grpc
     hexaqueue_collateral --> hexastack_auth & hexastack_core & hexastack_events & hexastack_fastapi
-    hexaqueue_dashboard --> hexastack_auth & hexastack_fastapi & hexastack_grpc
+    hexaqueue_dashboard --> hexastack_auth & hexastack_core & hexastack_cqrs & hexastack_fastapi & hexastack_grpc & hexastack_ui
     hexaqueue_monitor --> hexastack_core & hexastack_events & hexastack_otel
     hexaqueue_scanner --> hexastack_auth & hexastack_core & hexastack_events & hexastack_logging
     hexaqueue_worker --> hexastack_auth & hexastack_core & hexastack_grpc & hexastack_logging
-    hexaqueue_server --> hexastack_auth & hexastack_core & hexastack_cqrs & hexastack_db & hexastack_events & hexastack_fastapi & hexastack_grpc & hexastack_otel
+    hexaqueue_server --> hexastack_auth & hexastack_core & hexastack_cqrs & hexastack_db & hexastack_events & hexastack_fastapi & hexastack_grpc & hexastack_logging & hexastack_mcp & hexastack_otel
     hexaqueue_workflow --> hexastack_core & hexastack_grpc
 
     %% 4. Hexaflow Engine Integrations
     hexastack_flow --> hexaflow
     hexaqueue_workflow --> hexaflow
 
-    %% 5. Optional Extras
+    %% 5. Hexaqual Quality & Governance Integrations
+    hexastack_qual --> hexaqual
+    hexastack_qual -. "[events]" .-> hexastack_events
+    hexastack_qual -. "[mcp]" .-> hexastack_mcp
+    hexastack_qual -. "[ui]" .-> hexastack_ui
+
+    %% 6. Optional Extras
     hexastack_fastapi -. "[auth]" .-> hexastack_auth
     hexastack_graphql -. "[fastapi]" .-> hexastack_fastapi
     hexastack_mcp -. "[fastapi]" .-> hexastack_fastapi
@@ -178,7 +188,7 @@ flowchart TB
     hexastack_flow -. "[db]" .-> hexastack_db
     hexastack_flow -. "[events]" .-> hexastack_events
 
-    %% 6. Tooling & Governance (Hexaqual Plane)
+    %% 7. Tooling & Governance (Hexaqual Plane)
     hexaqual --> hexaflow
     hexaflow -. "dev" .-> hexaqual
     hexastack -. "dev" .-> hexaqual
@@ -189,18 +199,22 @@ flowchart TB
 
 ## 🔗 Cross-Repository Architectural Contracts
 
-1. **`hexastack-flow` $\to$ `hexaflow` Contract**:
-   - `hexaflow` provides the lightweight, zero-dependency DAG execution engine.
-   - `hexastack-flow` wraps `hexaflow` to provide enterprise-grade persistence adapters (`SqlAlchemyWorkflowStore`, `RedisWorkflowStore`) backed by `hexastack-db` without polluting `hexaflow`'s zero-dependency footprint.
-
-2. **`hexaqueue-workflow` $\to$ `hexaflow` Contract**:
-   - `hexaqueue-workflow` orchestrates distributed batch pipelines by compiling workflow definitions into `hexaflow` execution DAGs, resolving distributed split/join barriers over `hexastack-grpc`.
-
-3. **`hexaqueue` $\to$ `hexastack` Contract**:
+1. **`hexaqueue` $\to$ `hexastack` Contract**:
    - `hexaqueue-core` and `hexaqueue-server` leverage `hexastack-core` for base domain primitives, event envelope serialization, and `hexastack-cqrs` for pipeline execution.
    - Remote communication between `hexaqueue-cli`, `hexaqueue-server`, and `hexaqueue-worker` is powered by `hexastack-grpc` transport adapters.
    - Long-lived persistence and transaction outbox events are dispatched through `hexastack-db` and `hexastack-events`.
+   - `hexastack-qual` bridges `hexaqual` quality gates, MCP servers, and CQRS commands into Hexastack applications.
 
-4. **`hexaqual` Governance Plane**:
-   - All four repositories are governed by `hexaqual` via pre-commit hooks and GitHub Actions composite workflows (`TheTrueSCU/hexaqual@v0.5.1`).
+2. **`pytest-hexaqueue` $\to$ `hexaqueue-server` CI Contract**:
+   - `pytest-hexaqueue` serves as the distributed test execution plugin across the Hexa ecosystem, communicating with `hexaqueue-server` and `hexaqueue-collateral` for slice coordination, token authentication, collateral staging, and failure aggregation.
+
+3. **`hexaqueue-workflow` $\to$ `hexaflow` Contract**:
+   - `hexaqueue-workflow` orchestrates distributed batch pipelines by compiling workflow definitions into `hexaflow` execution DAGs, resolving distributed split/join barriers over `hexastack-grpc`.
+
+4. **`hexastack-flow` $\to$ `hexaflow` Contract**:
+   - `hexaflow` provides the lightweight, zero-daemon DAG execution engine.
+   - `hexastack-flow` wraps `hexaflow` to provide enterprise-grade persistence adapters (`SqlAlchemyWorkflowStore`) backed by `hexastack-db` without polluting `hexaflow`'s lightweight footprint.
+
+5. **`hexaqual` Governance Plane**:
+   - All four repositories are governed by `hexaqual` via pre-commit hooks and the `TheTrueSCU/hexaqual` GitHub Actions composite workflow.
    - Ensures strict 1:1 test parity, cognitive complexity $\le 25$, casefold `__all__` sorting, and import-linter hexagonal boundary enforcement across all packages.
