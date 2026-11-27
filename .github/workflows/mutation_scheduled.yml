@@ -26,7 +26,7 @@ jobs:
 
       - name: Plan AST-Weighted Mutation Slices
         id: plan
-        uses: TheTrueSCU/hexaqual/.github/actions/mutate-plan@6117ce25b1d39768f22396a55d13103abee88926 # v0.12.1
+        uses: TheTrueSCU/hexaqual/.github/actions/mutate-plan@7981788eea94e3a37cb5e24d4d30a07b1bc0bab4 # v0.13.0
         with:
           mode: slices
           root: src/hexaflow
