@@ -33,7 +33,7 @@ jobs:
           uvx --python 3.13 --from "hexaflow>=0.5.0" hexaflow graph render .github/workflows/ci.yml --summary --critical-path
 
       - name: Run Quality Gate via Hexaqual
-        uses: TheTrueSCU/hexaqual@6117ce25b1d39768f22396a55d13103abee88926 # v0.12.1
+        uses: TheTrueSCU/hexaqual@7981788eea94e3a37cb5e24d4d30a07b1bc0bab4 # v0.13.0
         with:
           sync-args: "--all-extras --dev"
 
@@ -166,7 +166,7 @@ jobs:
 
       - name: Plan AST-Weighted Changed Mutation Slices
         id: plan
-        uses: TheTrueSCU/hexaqual/.github/actions/mutate-plan@6117ce25b1d39768f22396a55d13103abee88926 # v0.12.1
+        uses: TheTrueSCU/hexaqual/.github/actions/mutate-plan@7981788eea94e3a37cb5e24d4d30a07b1bc0bab4 # v0.13.0
         with:
           mode: changed-slices
           base-ref: ${{ github.base_ref }}
